@@ -1,0 +1,43 @@
+{
+    "version": "4.5.5",
+    "compilerOptions": {
+        "declaration": true,
+        "allowJs": true,
+        "lib": ["es6", "dom"],
+        "jsx": "react",
+        "module": "commonjs",
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitAny": false,
+        "noImplicitThis": false,
+        "strictNullChecks": false,
+        "esModuleInterop": true,
+        "noImplicitReturns": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "outDir": "./tslib",
+        "rootDir": "src/",
+        "sourceMap": false,
+        "strict": true,
+        "target": "es5",
+        "plugins": [
+            {
+                "name": "typescript-tslint-plugin",
+                "alwaysShowRuleFailuresAsWarnings": true,
+                "ignoreDefinitionFiles": true,
+                "configFile": "./tslint.json"
+            }
+        ]
+    },
+    "include": [
+        "./src/**/*"
+    ],
+    "exclude": [
+        "build",
+        "node_modules",
+        "test/rules"
+    ],
+    "references": [
+        { "path": "../../common" }
+    ],
+}
+
