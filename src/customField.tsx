@@ -147,12 +147,15 @@ const CustomField = (props: CustomFieldProps) => {
       questionObj, null, null, null,
       (result) => {
         const data = JSON.parse(result.serverResponse.results);
-        const rawQuestions = data.questionsAnswers.records;
+        
+        const rawQuestions = data.questions.records;
+        const allAnswers = data.answers.records; // <-- Get the separate answers list
         const allLogicRules = data.logicRules.records;
-        console.log("Showing Data", data)
 
         setLogicRules(allLogicRules);
-        const processed = processAndMergeData(rawQuestions, allLogicRules);
+        
+        // --- FIX: Pass all three lists to the processing function ---
+        const processed = processAndMergeData(rawQuestions, allAnswers, allLogicRules);
         setQuestionData(processed);
 
         if (processed.length > 0) {
@@ -163,36 +166,34 @@ const CustomField = (props: CustomFieldProps) => {
     );
   };
 
-  const processAndMergeData = (rawQuestions, allLogicRules) => {
+  // --- FIXED: This function now correctly processes the three separate data lists ---
+  const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     const questionMap = new Map();
-    const getUniqueQuestionId = (item) => item.QuestionKey || `${item.QuestionGroupKey}-${item.QuestionOrder}`;
 
+    // Pass 1: Create unique question entries from the clean questions list
     rawQuestions.forEach((item) => {
-      const uniqueId = getUniqueQuestionId(item);
-      if (!questionMap.has(uniqueId)) {
-        questionMap.set(uniqueId, {
+      if (item.QuestionKey && !questionMap.has(item.QuestionKey)) {
+        questionMap.set(item.QuestionKey, {
           ...item,
-          QuestionKey: uniqueId,
           Options: [],
           defaultVisible: item.Visibility !== "0",
         });
       }
     });
 
-    rawQuestions.forEach((item) => {
-      if (item.AnswerKey) {
-        const uniqueId = getUniqueQuestionId(item);
-        const question = questionMap.get(uniqueId);
-        if (question && !question.Options.some(opt => opt.key === item.AnswerKey)) {
-          question.Options.push({
-            key: item.AnswerKey,
-            text: item.Answer,
-            order: parseInt(item.AnswerOrder || "0"),
-          });
-        }
+    // Pass 2: Add answers to their corresponding questions using the clean answers list
+    allAnswers.forEach((answer) => {
+      const question = questionMap.get(answer.QuestionKey);
+      if (question) {
+        question.Options.push({
+          key: answer.AnswerKey,
+          text: answer.Answer,
+          order: parseInt(answer.AnswerOrder || "0"),
+        });
       }
     });
 
+    // Pass 3: Attach JUMP logic to the specific answer options
     const jumpRules = allLogicRules.filter(r => r.Action === 'JUMP');
     jumpRules.forEach((rule) => {
       const sourceQuestion = questionMap.get(rule.QuestionKey);
@@ -204,17 +205,16 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
+    // Sort options within each question
     questionMap.forEach((q) => q.Options?.sort((a, b) => a.order - b.order));
+    
     return Array.from(questionMap.values());
   };
 
   const handleDialogClose = () => setDialogOpen(false);
 
   const handleAnswerChange = (questionKey, value) => {
-    setAnswers((prev) => ({
-      ...prev,
-      [questionKey]: value,
-    }));
+    setAnswers((prev) => ({ ...prev, [questionKey]: value }));
   };
 
   const handleMatrixChange = (
@@ -283,7 +283,7 @@ const CustomField = (props: CustomFieldProps) => {
       map.get(targetKey).push({
         sourceKey: rule.QuestionKey,
         triggerAnswerKey: rule.AnswerKey,
-        shouldShow: rule.Visibility === 'true',
+        shouldShow: rule.Visibility.toLowerCase() === 'show',
       });
     });
     return map;
@@ -359,11 +359,8 @@ const CustomField = (props: CustomFieldProps) => {
             sx={{ mb: 2 }}
           />
         </Box>
-
         {question.QuestionType === "Text" && <TextField fullWidth placeholder="Enter your answer..." variant="outlined" size="small" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
-        
         {question.QuestionType === "LongText" && <TextField fullWidth multiline rows={3} placeholder="Enter your detailed answer..." variant="outlined" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
-        
         {question.QuestionType === "MCQ" && (
             <FormControl component="fieldset">
                 <FormLabel component="legend">Select one option:</FormLabel>
@@ -372,14 +369,12 @@ const CustomField = (props: CustomFieldProps) => {
                 </RadioGroup>
             </FormControl>
         )}
-
         {question.QuestionType === "MultiSelect" && (
             <FormControl component="fieldset">
                 <FormLabel component="legend">Select all that apply:</FormLabel>
                 {question.Options?.map(option => <FormControlLabel key={option.key} control={<Checkbox checked={(currentAnswer || []).includes(option.key)} onChange={() => handleCheckboxChange(questionKey, option.key)} />} label={option.text} />)}
             </FormControl>
         )}
-
         {question.QuestionType === "Matrix" && (
             <Box>
                 <Typography variant="body2" gutterBottom color="text.secondary">{question.MatrixType === "multiple" ? "Select all that apply for each row:" : "Select one option for each row:"}</Typography>
@@ -410,9 +405,7 @@ const CustomField = (props: CustomFieldProps) => {
                 </TableContainer>
             </Box>
         )}
-
         {question.QuestionType === "Rating" && <SliderQuestion question={question} initialValue={currentAnswer} onCommitAnswer={newValue => handleAnswerChange(questionKey, newValue)} />}
-        
         {question.QuestionType === "YesNo" && (
             <FormControl component="fieldset">
                 <RadioGroup value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} row>
@@ -421,13 +414,9 @@ const CustomField = (props: CustomFieldProps) => {
                 </RadioGroup>
             </FormControl>
         )}
-
         {question.QuestionType === "Number" && <TextField type="number" placeholder="Enter a number..." variant="outlined" size="small" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
-        
         {question.QuestionType === "Email" && <TextField type="email" placeholder="Enter your email..." variant="outlined" size="small" fullWidth value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
-        
         {question.QuestionType === "Date" && <TextField type="date" variant="outlined" size="small" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} InputLabelProps={{ shrink: true }} />}
-        
         {question.QuestionType === "Dropdown" && (
             <FormControl fullWidth size="small">
                 <InputLabel>Select an option</InputLabel>
@@ -436,7 +425,6 @@ const CustomField = (props: CustomFieldProps) => {
                 </Select>
             </FormControl>
         )}
-        
         {question.QuestionType === "ImageCompare" && (
             <Box>
                 <Typography variant="body2" gutterBottom>Choose an image</Typography>
