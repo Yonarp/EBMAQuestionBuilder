@@ -57,13 +57,14 @@ interface ProcessedQuestion {
     key: string;
     text: string;
     order: number;
-    jumpTo?: string;
+    jumpToGroup?: string; // --- MODIFIED: Renamed for clarity ---
   }[];
 }
 
 interface QuestionGroup {
   groupName: string;
   groupOrder: number;
+  questionGroupKey: string; // --- MODIFIED: Added key to the group object ---
   questions: ProcessedQuestion[];
 }
 
@@ -147,7 +148,7 @@ const CustomField = (props: CustomFieldProps) => {
       questionObj, null, null, null,
       (result) => {
         const data = JSON.parse(result.serverResponse.results);
-        
+        console.log("Showing Data  --->", data)
         const rawQuestions = data.questions.records;
         const allAnswers = data.answers.records;
         const allLogicRules = data.logicRules.records;
@@ -188,13 +189,14 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
+    // --- MODIFIED: Attaches the NextQuestionGroup key to the option ---
     const jumpRules = allLogicRules.filter(r => r.Action === 'JUMP');
     jumpRules.forEach((rule) => {
       const sourceQuestion = questionMap.get(rule.QuestionKey);
       if (sourceQuestion?.Options) {
         const targetOption = sourceQuestion.Options.find(opt => opt.key === rule.AnswerKey);
         if (targetOption) {
-          targetOption.jumpTo = rule.NextQuestion;
+          targetOption.jumpToGroup = rule.NextQuestionGroup; // Use NextQuestionGroup
         }
       }
     });
@@ -246,6 +248,7 @@ const CustomField = (props: CustomFieldProps) => {
     });
   };
 
+  // --- MODIFIED: Now includes the questionGroupKey in the final group object ---
   const groupedQuestions = useMemo(() => {
     if (questionData.length === 0) return [];
     const groups = {};
@@ -254,6 +257,7 @@ const CustomField = (props: CustomFieldProps) => {
         groups[question.QuestionGroupKey] = {
           groupName: question.GroupName,
           groupOrder: parseInt(question.GroupOrder),
+          questionGroupKey: question.QuestionGroupKey, // Store the key
           questions: [],
         };
       }
@@ -282,7 +286,6 @@ const CustomField = (props: CustomFieldProps) => {
     return map;
   }, [logicRules]);
 
-  // --- FIXED: This function now handles both single (string) and multi (array) answers ---
   const isQuestionVisible = (question) => {
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
 
@@ -292,54 +295,53 @@ const CustomField = (props: CustomFieldProps) => {
 
     for (const rule of rulesForThisQuestion) {
       const userAnswer = answers[rule.sourceKey];
-      if (!userAnswer) continue; // Skip if no answer is given for the source question
+      if (!userAnswer) continue;
 
       let conditionMet = false;
-
-      // Check if the answer is an array (for MultiSelect)
       if (Array.isArray(userAnswer)) {
         conditionMet = userAnswer.includes(rule.triggerAnswerKey);
-      }
-      // Otherwise, treat it as a single value (for MCQ, YesNo, etc.)
-      else {
+      } else {
         conditionMet = userAnswer === rule.triggerAnswerKey;
       }
 
       if (conditionMet && rule.shouldShow) {
-        return true; // A rule's condition is met, so show the question.
+        return true;
       }
     }
-
-    // If a question has rules but no "show" conditions were met, it remains hidden.
     return false;
   };
 
-  const questionKeyToGroupIndexMap = useMemo(() => {
+  // --- NEW: A map to quickly find a group's index by its key ---
+  const questionGroupKeyToIndexMap = useMemo(() => {
     const map = new Map();
     groupedQuestions.forEach((group, index) => {
-      group.questions.forEach((q) => {
-        map.set(q.QuestionKey, index);
-      });
+      map.set(group.questionGroupKey, index);
     });
     return map;
   }, [groupedQuestions]);
 
+  // --- MODIFIED: Jump logic now uses the new map and data structure ---
   const handleNext = () => {
     const currentGroup = groupedQuestions[currentGroupIndex];
     let nextGroupIndex = currentGroupIndex + 1;
+
     for (const question of currentGroup.questions) {
       const userAnswerKey = answers[question.QuestionKey];
       if (userAnswerKey && question.Options) {
         const selectedOption = question.Options.find(opt => opt.key === userAnswerKey);
-        if (selectedOption?.jumpTo) {
-          const jumpToGroupIndex = questionKeyToGroupIndexMap.get(selectedOption.jumpTo);
+        
+        if (selectedOption?.jumpToGroup) {
+          const targetGroupKey = selectedOption.jumpToGroup;
+          const jumpToGroupIndex = questionGroupKeyToIndexMap.get(targetGroupKey);
+          
           if (jumpToGroupIndex !== undefined) {
             nextGroupIndex = jumpToGroupIndex;
-            break;
+            break; 
           }
         }
       }
     }
+    
     if (nextGroupIndex >= groupedQuestions.length) {
       handleSubmit();
     } else {
