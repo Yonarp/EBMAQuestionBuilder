@@ -282,17 +282,35 @@ const CustomField = (props: CustomFieldProps) => {
     return map;
   }, [logicRules]);
 
+  // --- FIXED: This function now handles both single (string) and multi (array) answers ---
   const isQuestionVisible = (question) => {
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
+
     if (!rulesForThisQuestion) {
       return question.defaultVisible;
     }
+
     for (const rule of rulesForThisQuestion) {
       const userAnswer = answers[rule.sourceKey];
-      if (userAnswer && userAnswer === rule.triggerAnswerKey && rule.shouldShow) {
-        return true;
+      if (!userAnswer) continue; // Skip if no answer is given for the source question
+
+      let conditionMet = false;
+
+      // Check if the answer is an array (for MultiSelect)
+      if (Array.isArray(userAnswer)) {
+        conditionMet = userAnswer.includes(rule.triggerAnswerKey);
+      }
+      // Otherwise, treat it as a single value (for MCQ, YesNo, etc.)
+      else {
+        conditionMet = userAnswer === rule.triggerAnswerKey;
+      }
+
+      if (conditionMet && rule.shouldShow) {
+        return true; // A rule's condition is met, so show the question.
       }
     }
+
+    // If a question has rules but no "show" conditions were met, it remains hidden.
     return false;
   };
 
@@ -338,8 +356,7 @@ const CustomField = (props: CustomFieldProps) => {
   const renderQuestion = (question, index) => {
     const questionKey = question.QuestionKey;
     const currentAnswer = answers[questionKey] || "";
-
-    // --- FIX: Define static data for the Matrix here ---
+    
     const staticMatrixColumns = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"];
     const staticMatrixRows = ["Service Quality", "Product Value", "Customer Support"];
 
@@ -380,12 +397,10 @@ const CustomField = (props: CustomFieldProps) => {
                         <TableHead>
                             <TableRow>
                                 <TableCell sx={{ fontWeight: "bold", bgcolor: "grey.50" }} />
-                                {/* --- FIX: Use static columns --- */}
                                 {staticMatrixColumns.map((col, i) => <TableCell key={i} align="center" sx={{ fontWeight: "bold", bgcolor: "grey.50" }}>{col}</TableCell>)}
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            {/* --- FIX: Use static rows --- */}
                             {staticMatrixRows.map((row, rIdx) => (
                                 <TableRow key={rIdx} hover>
                                     <TableCell sx={{ fontWeight: "medium" }}>{row}</TableCell>
