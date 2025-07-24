@@ -149,12 +149,10 @@ const CustomField = (props: CustomFieldProps) => {
         const data = JSON.parse(result.serverResponse.results);
         
         const rawQuestions = data.questions.records;
-        const allAnswers = data.answers.records; // <-- Get the separate answers list
+        const allAnswers = data.answers.records;
         const allLogicRules = data.logicRules.records;
 
         setLogicRules(allLogicRules);
-        
-        // --- FIX: Pass all three lists to the processing function ---
         const processed = processAndMergeData(rawQuestions, allAnswers, allLogicRules);
         setQuestionData(processed);
 
@@ -166,11 +164,9 @@ const CustomField = (props: CustomFieldProps) => {
     );
   };
 
-  // --- FIXED: This function now correctly processes the three separate data lists ---
   const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     const questionMap = new Map();
 
-    // Pass 1: Create unique question entries from the clean questions list
     rawQuestions.forEach((item) => {
       if (item.QuestionKey && !questionMap.has(item.QuestionKey)) {
         questionMap.set(item.QuestionKey, {
@@ -181,7 +177,6 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // Pass 2: Add answers to their corresponding questions using the clean answers list
     allAnswers.forEach((answer) => {
       const question = questionMap.get(answer.QuestionKey);
       if (question) {
@@ -193,7 +188,6 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // Pass 3: Attach JUMP logic to the specific answer options
     const jumpRules = allLogicRules.filter(r => r.Action === 'JUMP');
     jumpRules.forEach((rule) => {
       const sourceQuestion = questionMap.get(rule.QuestionKey);
@@ -205,7 +199,6 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // Sort options within each question
     questionMap.forEach((q) => q.Options?.sort((a, b) => a.order - b.order));
     
     return Array.from(questionMap.values());
@@ -346,6 +339,10 @@ const CustomField = (props: CustomFieldProps) => {
     const questionKey = question.QuestionKey;
     const currentAnswer = answers[questionKey] || "";
 
+    // --- FIX: Define static data for the Matrix here ---
+    const staticMatrixColumns = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"];
+    const staticMatrixRows = ["Service Quality", "Product Value", "Customer Support"];
+
     return (
       <Paper key={questionKey} elevation={1} sx={{ p: 3, mb: 2 }}>
         <Box sx={{ mb: 2 }}>
@@ -383,14 +380,16 @@ const CustomField = (props: CustomFieldProps) => {
                         <TableHead>
                             <TableRow>
                                 <TableCell sx={{ fontWeight: "bold", bgcolor: "grey.50" }} />
-                                {(question.MatrixColumns || []).map((col, i) => <TableCell key={i} align="center" sx={{ fontWeight: "bold", bgcolor: "grey.50" }}>{col}</TableCell>)}
+                                {/* --- FIX: Use static columns --- */}
+                                {staticMatrixColumns.map((col, i) => <TableCell key={i} align="center" sx={{ fontWeight: "bold", bgcolor: "grey.50" }}>{col}</TableCell>)}
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            {(question.MatrixRows || []).map((row, rIdx) => (
+                            {/* --- FIX: Use static rows --- */}
+                            {staticMatrixRows.map((row, rIdx) => (
                                 <TableRow key={rIdx} hover>
                                     <TableCell sx={{ fontWeight: "medium" }}>{row}</TableCell>
-                                    {(question.MatrixColumns || []).map((_, cIdx) => (
+                                    {staticMatrixColumns.map((_, cIdx) => (
                                         <TableCell key={cIdx} align="center">
                                             {question.MatrixType === "multiple" ?
                                                 <Checkbox checked={(((answers[questionKey] || {})[rIdx] || [])).includes(cIdx)} onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "multiple")} /> :
