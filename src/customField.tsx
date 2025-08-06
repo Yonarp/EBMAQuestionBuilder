@@ -49,22 +49,24 @@ interface ProcessedQuestion {
   QuestionaireName: string;
   MinRange?: number;
   MaxRange?: number;
-  MatrixRows?: string[];
-  MatrixColumns?: string[];
+  MatrixRows?: { key: string; text: string; order: number }[];
+  MatrixColumns?: { key: string; text: string; order: number }[];
   MatrixType?: "single" | "multiple";
   defaultVisible: boolean;
+  RegEx?: string;
+  RegExMessage?: string;
   Options?: {
     key: string;
     text: string;
     order: number;
-    jumpToGroup?: string; // --- MODIFIED: Renamed for clarity ---
+    jumpToGroup?: string;
   }[];
 }
 
 interface QuestionGroup {
   groupName: string;
   groupOrder: number;
-  questionGroupKey: string; // --- MODIFIED: Added key to the group object ---
+  questionGroupKey: string;
   questions: ProcessedQuestion[];
 }
 
@@ -132,12 +134,14 @@ const CustomField = (props: CustomFieldProps) => {
   const [surveyTitle, setSurveyTitle] = useState("");
   const [answers, setAnswers] = useState({});
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
+  const [errors, setErrors] = useState({});
 
   const handleDialogOpen = async () => {
     setDialogOpen(true);
     setLoading(true);
     setCurrentGroupIndex(0);
     setAnswers({});
+    setErrors({});
 
     const questionnaireKey =
       five.form.Questionaires["Questionaire.QuestionaireKey"];
@@ -145,16 +149,24 @@ const CustomField = (props: CustomFieldProps) => {
 
     await five.executeFunction(
       "Q200GetQuestionData",
-      questionObj, null, null, null,
+      questionObj,
+      null,
+      null,
+      null,
       (result) => {
         const data = JSON.parse(result.serverResponse.results);
-        console.log("Showing Data  --->", data)
+        console.log("Logging Data", data);
+
         const rawQuestions = data.questions.records;
         const allAnswers = data.answers.records;
         const allLogicRules = data.logicRules.records;
 
         setLogicRules(allLogicRules);
-        const processed = processAndMergeData(rawQuestions, allAnswers, allLogicRules);
+        const processed = processAndMergeData(
+          rawQuestions,
+          allAnswers,
+          allLogicRules
+        );
         setQuestionData(processed);
 
         if (processed.length > 0) {
@@ -168,41 +180,70 @@ const CustomField = (props: CustomFieldProps) => {
   const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     const questionMap = new Map();
 
+    // Initialize questions with empty arrays for Matrix data
     rawQuestions.forEach((item) => {
       if (item.QuestionKey && !questionMap.has(item.QuestionKey)) {
         questionMap.set(item.QuestionKey, {
           ...item,
           Options: [],
+          MatrixRows: [],
+          MatrixColumns: [],
           defaultVisible: item.Visibility !== "0",
         });
       }
     });
 
+    // Process answers and categorize them properly
     allAnswers.forEach((answer) => {
       const question = questionMap.get(answer.QuestionKey);
       if (question) {
-        question.Options.push({
-          key: answer.AnswerKey,
-          text: answer.Answer,
-          order: parseInt(answer.AnswerOrder || "0"),
-        });
-      }
-    });
-
-    // --- MODIFIED: Attaches the NextQuestionGroup key to the option ---
-    const jumpRules = allLogicRules.filter(r => r.Action === 'JUMP');
-    jumpRules.forEach((rule) => {
-      const sourceQuestion = questionMap.get(rule.QuestionKey);
-      if (sourceQuestion?.Options) {
-        const targetOption = sourceQuestion.Options.find(opt => opt.key === rule.AnswerKey);
-        if (targetOption) {
-          targetOption.jumpToGroup = rule.NextQuestionGroup; // Use NextQuestionGroup
+        if (question.QuestionType === "Matrix") {
+          // Handle Matrix rows and columns using MatrixType field with separate ordering
+          if (answer.MatrixType === "row") {
+            question.MatrixRows.push({
+              key: answer.AnswerKey,
+              text: answer.Answer,
+              order: parseInt(answer.MatrixRowOrder || "0"),
+            });
+          } else if (answer.MatrixType === "column") {
+            question.MatrixColumns.push({
+              key: answer.AnswerKey,
+              text: answer.Answer,
+              order: parseInt(answer.MatrixColumnOrder || "0"),
+            });
+          }
+        } else {
+          // Regular options for other question types
+          question.Options.push({
+            key: answer.AnswerKey,
+            text: answer.Answer,
+            order: parseInt(answer.AnswerOrder || "0"),
+          });
         }
       }
     });
 
-    questionMap.forEach((q) => q.Options?.sort((a, b) => a.order - b.order));
-    
+    // Handle jump logic
+    const jumpRules = allLogicRules.filter((r) => r.Action === "JUMP");
+    jumpRules.forEach((rule) => {
+      const sourceQuestion = questionMap.get(rule.QuestionKey);
+      if (sourceQuestion?.Options) {
+        const targetOption = sourceQuestion.Options.find(
+          (opt) => opt.key === rule.AnswerKey
+        );
+        if (targetOption) {
+          targetOption.jumpToGroup = rule.NextQuestionGroup;
+        }
+      }
+    });
+
+    // Sort all arrays by their respective order fields
+    questionMap.forEach((q) => {
+      q.Options?.sort((a, b) => a.order - b.order);
+      q.MatrixRows?.sort((a, b) => a.order - b.order);
+      q.MatrixColumns?.sort((a, b) => a.order - b.order);
+    });
+
     return Array.from(questionMap.values());
   };
 
@@ -210,6 +251,31 @@ const CustomField = (props: CustomFieldProps) => {
 
   const handleAnswerChange = (questionKey, value) => {
     setAnswers((prev) => ({ ...prev, [questionKey]: value }));
+  };
+
+  const handleRegExChange = (questionKey, value, regexString, errorMessage) => {
+    handleAnswerChange(questionKey, value);
+
+    if (!regexString) return;
+
+    try {
+      const pattern = regexString.startsWith("/")
+        ? regexString.slice(1, -1)
+        : regexString;
+      const regex = new RegExp(pattern);
+
+      if (!regex.test(value) && value !== "") {
+        setErrors((prev) => ({ ...prev, [questionKey]: errorMessage }));
+      } else {
+        setErrors((prev) => ({ ...prev, [questionKey]: null }));
+      }
+    } catch (e) {
+      console.error("Invalid RegEx pattern provided:", regexString);
+      setErrors((prev) => ({
+        ...prev,
+        [questionKey]: "Invalid validation rule.",
+      }));
+    }
   };
 
   const handleMatrixChange = (
@@ -248,7 +314,6 @@ const CustomField = (props: CustomFieldProps) => {
     });
   };
 
-  // --- MODIFIED: Now includes the questionGroupKey in the final group object ---
   const groupedQuestions = useMemo(() => {
     if (questionData.length === 0) return [];
     const groups = {};
@@ -257,22 +322,24 @@ const CustomField = (props: CustomFieldProps) => {
         groups[question.QuestionGroupKey] = {
           groupName: question.GroupName,
           groupOrder: parseInt(question.GroupOrder),
-          questionGroupKey: question.QuestionGroupKey, // Store the key
+          questionGroupKey: question.QuestionGroupKey,
           questions: [],
         };
       }
       groups[question.QuestionGroupKey].questions.push(question);
     });
     Object.values(groups).forEach((group) => {
-      group.questions.sort((a, b) => parseInt(a.QuestionOrder) - parseInt(b.QuestionOrder));
+      group.questions.sort(
+        (a, b) => parseInt(a.QuestionOrder) - parseInt(b.QuestionOrder)
+      );
     });
     return Object.values(groups).sort((a, b) => a.groupOrder - b.groupOrder);
   }, [questionData]);
 
   const visibilityRules = useMemo(() => {
     const map = new Map();
-    const showHideRules = logicRules.filter(r => r.Action === 'SHOW_HIDE');
-    showHideRules.forEach(rule => {
+    const showHideRules = logicRules.filter((r) => r.Action === "SHOW_HIDE");
+    showHideRules.forEach((rule) => {
       const targetKey = rule.NextQuestion;
       if (!map.has(targetKey)) {
         map.set(targetKey, []);
@@ -280,7 +347,7 @@ const CustomField = (props: CustomFieldProps) => {
       map.get(targetKey).push({
         sourceKey: rule.QuestionKey,
         triggerAnswerKey: rule.AnswerKey,
-        shouldShow: rule.Visibility.toLowerCase() === 'show',
+        shouldShow: rule.Visibility.toLowerCase() === "show",
       });
     });
     return map;
@@ -288,22 +355,18 @@ const CustomField = (props: CustomFieldProps) => {
 
   const isQuestionVisible = (question) => {
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
-
     if (!rulesForThisQuestion) {
       return question.defaultVisible;
     }
-
     for (const rule of rulesForThisQuestion) {
       const userAnswer = answers[rule.sourceKey];
       if (!userAnswer) continue;
-
       let conditionMet = false;
       if (Array.isArray(userAnswer)) {
         conditionMet = userAnswer.includes(rule.triggerAnswerKey);
       } else {
         conditionMet = userAnswer === rule.triggerAnswerKey;
       }
-
       if (conditionMet && rule.shouldShow) {
         return true;
       }
@@ -311,7 +374,6 @@ const CustomField = (props: CustomFieldProps) => {
     return false;
   };
 
-  // --- NEW: A map to quickly find a group's index by its key ---
   const questionGroupKeyToIndexMap = useMemo(() => {
     const map = new Map();
     groupedQuestions.forEach((group, index) => {
@@ -320,28 +382,41 @@ const CustomField = (props: CustomFieldProps) => {
     return map;
   }, [groupedQuestions]);
 
-  // --- MODIFIED: Jump logic now uses the new map and data structure ---
   const handleNext = () => {
     const currentGroup = groupedQuestions[currentGroupIndex];
-    let nextGroupIndex = currentGroupIndex + 1;
+    const visibleQuestions = currentGroup.questions.filter((q) =>
+      isQuestionVisible(q)
+    );
 
+    for (const question of visibleQuestions) {
+      if (errors[question.QuestionKey]) {
+        alert(
+          `Please fix the errors before proceeding: ${
+            errors[question.QuestionKey]
+          }`
+        );
+        return;
+      }
+    }
+
+    let nextGroupIndex = currentGroupIndex + 1;
     for (const question of currentGroup.questions) {
       const userAnswerKey = answers[question.QuestionKey];
       if (userAnswerKey && question.Options) {
-        const selectedOption = question.Options.find(opt => opt.key === userAnswerKey);
-        
+        const selectedOption = question.Options.find(
+          (opt) => opt.key === userAnswerKey
+        );
         if (selectedOption?.jumpToGroup) {
           const targetGroupKey = selectedOption.jumpToGroup;
-          const jumpToGroupIndex = questionGroupKeyToIndexMap.get(targetGroupKey);
-          
+          const jumpToGroupIndex =
+            questionGroupKeyToIndexMap.get(targetGroupKey);
           if (jumpToGroupIndex !== undefined) {
             nextGroupIndex = jumpToGroupIndex;
-            break; 
+            break;
           }
         }
       }
     }
-    
     if (nextGroupIndex >= groupedQuestions.length) {
       handleSubmit();
     } else {
@@ -358,9 +433,6 @@ const CustomField = (props: CustomFieldProps) => {
   const renderQuestion = (question, index) => {
     const questionKey = question.QuestionKey;
     const currentAnswer = answers[questionKey] || "";
-    
-    const staticMatrixColumns = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"];
-    const staticMatrixRows = ["Service Quality", "Product Value", "Customer Support"];
 
     return (
       <Paper key={questionKey} elevation={1} sx={{ p: 3, mb: 2 }}>
@@ -375,95 +447,278 @@ const CustomField = (props: CustomFieldProps) => {
             sx={{ mb: 2 }}
           />
         </Box>
-        {question.QuestionType === "Text" && <TextField fullWidth placeholder="Enter your answer..." variant="outlined" size="small" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
-        {question.QuestionType === "LongText" && <TextField fullWidth multiline rows={3} placeholder="Enter your detailed answer..." variant="outlined" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
+
+        {question.QuestionType === "Text" && (
+          <TextField
+            fullWidth
+            placeholder="Enter your answer..."
+            variant="outlined"
+            size="small"
+            value={currentAnswer}
+            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+          />
+        )}
+
+        {question.QuestionType === "LongText" && (
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            placeholder="Enter your detailed answer..."
+            variant="outlined"
+            value={currentAnswer}
+            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+          />
+        )}
+
+        {question.QuestionType === "RegEx" && (
+          <TextField
+            fullWidth
+            placeholder="Enter your answer..."
+            variant="outlined"
+            size="small"
+            value={currentAnswer}
+            onChange={(e) =>
+              handleRegExChange(
+                questionKey,
+                e.target.value,
+                question.RegEx,
+                question.RegExMessage
+              )
+            }
+            error={!!errors[questionKey]}
+            helperText={errors[questionKey] || ""}
+          />
+        )}
+
         {question.QuestionType === "MCQ" && (
-            <FormControl component="fieldset">
-                <FormLabel component="legend">Select one option:</FormLabel>
-                <RadioGroup value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)}>
-                    {question.Options?.map(option => <FormControlLabel key={option.key} value={option.key} control={<Radio />} label={option.text} />)}
-                </RadioGroup>
-            </FormControl>
+          <FormControl component="fieldset">
+            <FormLabel component="legend">Select one option:</FormLabel>
+            <RadioGroup
+              value={currentAnswer}
+              onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+            >
+              {question.Options?.map((option) => (
+                <FormControlLabel
+                  key={option.key}
+                  value={option.key}
+                  control={<Radio />}
+                  label={option.text}
+                />
+              ))}
+            </RadioGroup>
+          </FormControl>
         )}
+
         {question.QuestionType === "MultiSelect" && (
-            <FormControl component="fieldset">
-                <FormLabel component="legend">Select all that apply:</FormLabel>
-                {question.Options?.map(option => <FormControlLabel key={option.key} control={<Checkbox checked={(currentAnswer || []).includes(option.key)} onChange={() => handleCheckboxChange(questionKey, option.key)} />} label={option.text} />)}
-            </FormControl>
+          <FormControl component="fieldset">
+            <FormLabel component="legend">Select all that apply:</FormLabel>
+            {question.Options?.map((option) => (
+              <FormControlLabel
+                key={option.key}
+                control={
+                  <Checkbox
+                    checked={(currentAnswer || []).includes(option.key)}
+                    onChange={() =>
+                      handleCheckboxChange(questionKey, option.key)
+                    }
+                  />
+                }
+                label={option.text}
+              />
+            ))}
+          </FormControl>
         )}
+
         {question.QuestionType === "Matrix" && (
-            <Box>
-                <Typography variant="body2" gutterBottom color="text.secondary">{question.MatrixType === "multiple" ? "Select all that apply for each row:" : "Select one option for each row:"}</Typography>
-                <TableContainer component={Paper} variant="outlined" sx={{ mt: 2 }}>
-                    <Table size="small">
-                        <TableHead>
-                            <TableRow>
-                                <TableCell sx={{ fontWeight: "bold", bgcolor: "grey.50" }} />
-                                {staticMatrixColumns.map((col, i) => <TableCell key={i} align="center" sx={{ fontWeight: "bold", bgcolor: "grey.50" }}>{col}</TableCell>)}
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {staticMatrixRows.map((row, rIdx) => (
-                                <TableRow key={rIdx} hover>
-                                    <TableCell sx={{ fontWeight: "medium" }}>{row}</TableCell>
-                                    {staticMatrixColumns.map((_, cIdx) => (
-                                        <TableCell key={cIdx} align="center">
-                                            {question.MatrixType === "multiple" ?
-                                                <Checkbox checked={(((answers[questionKey] || {})[rIdx] || [])).includes(cIdx)} onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "multiple")} /> :
-                                                <Radio checked={(answers[questionKey] || {})[rIdx] === cIdx} onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "single")} name={`matrix-${questionKey}-row-${rIdx}`} />
-                                            }
-                                        </TableCell>
-                                    ))}
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </Box>
+          <Box>
+            <Typography variant="body2" gutterBottom color="text.secondary">
+              {question.MatrixType === "multiple" 
+                ? "Select all that apply for each row:" 
+                : "Select one option for each row:"
+              }
+            </Typography>
+            {question.MatrixRows?.length > 0 && question.MatrixColumns?.length > 0 ? (
+              <TableContainer component={Paper} variant="outlined" sx={{ mt: 2 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: "bold", bgcolor: "grey.50" }} />
+                      {question.MatrixColumns.map((col) => (
+                        <TableCell key={col.key} align="center" sx={{ fontWeight: "bold", bgcolor: "grey.50" }}>
+                          {col.text}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {question.MatrixRows.map((row, rIdx) => (
+                      <TableRow key={row.key} hover>
+                        <TableCell sx={{ fontWeight: "medium" }}>{row.text}</TableCell>
+                        {question.MatrixColumns.map((col, cIdx) => (
+                          <TableCell key={col.key} align="center">
+                            {question.MatrixType === "multiple" ? (
+                              <Checkbox
+                                checked={(((answers[questionKey] || {})[rIdx] || [])).includes(cIdx)}
+                                onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "multiple")}
+                              />
+                            ) : (
+                              <Radio
+                                checked={(answers[questionKey] || {})[rIdx] === cIdx}
+                                onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "single")}
+                                name={`matrix-${questionKey}-row-${rIdx}`}
+                              />
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            ) : (
+              <Typography color="warning.main" variant="body2">
+                Matrix question is missing rows or columns. Please check your data.
+                <br />
+                Debug: Rows: {question.MatrixRows?.length || 0}, Columns: {question.MatrixColumns?.length || 0}
+              </Typography>
+            )}
+          </Box>
         )}
-        {question.QuestionType === "Rating" && <SliderQuestion question={question} initialValue={currentAnswer} onCommitAnswer={newValue => handleAnswerChange(questionKey, newValue)} />}
+
+        {question.QuestionType === "Rating" && (
+          <SliderQuestion
+            question={question}
+            initialValue={currentAnswer}
+            onCommitAnswer={(newValue) =>
+              handleAnswerChange(questionKey, newValue)
+            }
+          />
+        )}
+
         {question.QuestionType === "YesNo" && (
-            <FormControl component="fieldset">
-                <RadioGroup value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} row>
-                    <FormControlLabel value="yes" control={<Radio />} label="Yes" />
-                    <FormControlLabel value="no" control={<Radio />} label="No" />
-                </RadioGroup>
-            </FormControl>
+          <FormControl component="fieldset">
+            <RadioGroup
+              value={currentAnswer}
+              onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+              row
+            >
+              <FormControlLabel value="yes" control={<Radio />} label="Yes" />
+              <FormControlLabel value="no" control={<Radio />} label="No" />
+            </RadioGroup>
+          </FormControl>
         )}
-        {question.QuestionType === "Number" && <TextField type="number" placeholder="Enter a number..." variant="outlined" size="small" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
-        {question.QuestionType === "Email" && <TextField type="email" placeholder="Enter your email..." variant="outlined" size="small" fullWidth value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} />}
-        {question.QuestionType === "Date" && <TextField type="date" variant="outlined" size="small" value={currentAnswer} onChange={(e) => handleAnswerChange(questionKey, e.target.value)} InputLabelProps={{ shrink: true }} />}
+
+        {question.QuestionType === "Number" && (
+          <TextField
+            type="number"
+            placeholder="Enter a number..."
+            variant="outlined"
+            size="small"
+            value={currentAnswer}
+            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+          />
+        )}
+
+        {question.QuestionType === "Email" && (
+          <TextField
+            type="email"
+            placeholder="Enter your email..."
+            variant="outlined"
+            size="small"
+            fullWidth
+            value={currentAnswer}
+            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+          />
+        )}
+
+        {question.QuestionType === "Date" && (
+          <TextField
+            type="date"
+            variant="outlined"
+            size="small"
+            value={currentAnswer}
+            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+            InputLabelProps={{ shrink: true }}
+          />
+        )}
+
         {question.QuestionType === "Dropdown" && (
-            <FormControl fullWidth size="small">
-                <InputLabel>Select an option</InputLabel>
-                <Select value={currentAnswer} label="Select an option" onChange={(e) => handleAnswerChange(questionKey, e.target.value)}>
-                    {question.Options?.map(option => <MenuItem key={option.key} value={option.key}>{option.text}</MenuItem>)}
-                </Select>
-            </FormControl>
+          <FormControl fullWidth size="small">
+            <InputLabel>Select an option</InputLabel>
+            <Select
+              value={currentAnswer}
+              label="Select an option"
+              onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+            >
+              {question.Options?.map((option) => (
+                <MenuItem key={option.key} value={option.key}>
+                  {option.text}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         )}
+
         {question.QuestionType === "ImageCompare" && (
-            <Box>
-                <Typography variant="body2" gutterBottom>Choose an image</Typography>
-                {[{ id: "left", label: "Image A", src: "https://picsum.photos/seed/a/400/250" }, { id: "right", label: "Image B", src: "https://picsum.photos/seed/b/400/250" }].map(opt => (
-                    <Card key={opt.id} sx={{ mb: 2, border: currentAnswer === opt.id ? "3px solid #1976d2" : "1px solid #e0e0e0" }}>
-                        <CardActionArea onClick={() => handleAnswerChange(questionKey, opt.id)}>
-                            <CardMedia component="img" height="250" image={opt.src} alt={opt.label} />
-                            <Box sx={{ p: 1, textAlign: "center" }}><Typography>{opt.label}</Typography></Box>
-                        </CardActionArea>
-                    </Card>
-                ))}
-            </Box>
+          <Box>
+            <Typography variant="body2" gutterBottom>
+              Choose an image
+            </Typography>
+            {[
+              {
+                id: "left",
+                label: "Image A",
+                src: "https://picsum.photos/seed/a/400/250",
+              },
+              {
+                id: "right",
+                label: "Image B",
+                src: "https://picsum.photos/seed/b/400/250",
+              },
+            ].map((opt) => (
+              <Card
+                key={opt.id}
+                sx={{
+                  mb: 2,
+                  border:
+                    currentAnswer === opt.id
+                      ? "3px solid #1976d2"
+                      : "1px solid #e0e0e0",
+                }}
+              >
+                <CardActionArea
+                  onClick={() => handleAnswerChange(questionKey, opt.id)}
+                >
+                  <CardMedia
+                    component="img"
+                    height="250"
+                    image={opt.src}
+                    alt={opt.label}
+                  />
+                  <Box sx={{ p: 1, textAlign: "center" }}>
+                    <Typography>{opt.label}</Typography>
+                  </Box>
+                </CardActionArea>
+              </Card>
+            ))}
+          </Box>
         )}
       </Paper>
     );
   };
-  
+
   const isLastGroup = currentGroupIndex >= groupedQuestions.length - 1;
 
   return (
     <ThemeProvider theme={theme}>
       <Button onClick={handleDialogOpen}>View Survey</Button>
-      <Dialog open={dialogOpen} onClose={handleDialogClose} maxWidth="md" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={handleDialogClose}
+        maxWidth="md"
+        fullWidth
+      >
         <DialogTitle>{surveyTitle || "Survey"}</DialogTitle>
         <DialogContent>
           {loading ? (
@@ -472,17 +727,24 @@ const CustomField = (props: CustomFieldProps) => {
             </Box>
           ) : (
             <Box sx={{ mb: 3 }}>
-              {groupedQuestions.length > 0 && groupedQuestions[currentGroupIndex] && (
+              {groupedQuestions.length > 0 &&
+                groupedQuestions[currentGroupIndex] && (
                   <>
-                    <Typography variant="h5" gutterBottom sx={{ color: "primary.main" }}>
-                        {groupedQuestions[currentGroupIndex].groupName}
+                    <Typography
+                      variant="h5"
+                      gutterBottom
+                      sx={{ color: "primary.main" }}
+                    >
+                      {groupedQuestions[currentGroupIndex].groupName}
                     </Typography>
                     <Divider sx={{ mb: 3 }} />
                     {groupedQuestions[currentGroupIndex].questions
-                      .filter(q => isQuestionVisible(q))
-                      .map((question, qIndex) => renderQuestion(question, qIndex))}
+                      .filter((q) => isQuestionVisible(q))
+                      .map((question, qIndex) =>
+                        renderQuestion(question, qIndex)
+                      )}
                   </>
-              )}
+                )}
             </Box>
           )}
         </DialogContent>
