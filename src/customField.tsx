@@ -50,8 +50,15 @@ interface ProcessedQuestion {
   MinRange?: number;
   MaxRange?: number;
   MatrixRows?: { key: string; text: string; order: number }[];
-  MatrixColumns?: { key: string; text: string; order: number }[];
+  MatrixColumns?: { key: string; text: string; order: number; isExclusive?: boolean }[];
   MatrixType?: "single" | "multiple";
+  matrixJumpLogic?: { 
+    answerKey: string; 
+    matrixRowPair: string;
+    matrixColumnPair: string;
+    jumpToGroup: string; 
+    conditions: string 
+  }[];
   defaultVisible: boolean;
   RegEx?: string;
   RegExMessage?: string;
@@ -210,6 +217,7 @@ const CustomField = (props: CustomFieldProps) => {
               key: answer.AnswerKey,
               text: answer.Answer,
               order: parseInt(answer.MatrixColumnOrder || "0"),
+              isExclusive: answer.MatrixExcludeCell === "1" || answer.MatrixExcludeCell === 1,
             });
           }
         } else {
@@ -223,16 +231,33 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // Handle jump logic
+    // Handle jump logic for both MCQ and Matrix questions
     const jumpRules = allLogicRules.filter((r) => r.Action === "JUMP");
     jumpRules.forEach((rule) => {
       const sourceQuestion = questionMap.get(rule.QuestionKey);
-      if (sourceQuestion?.Options) {
-        const targetOption = sourceQuestion.Options.find(
-          (opt) => opt.key === rule.AnswerKey
-        );
-        if (targetOption) {
-          targetOption.jumpToGroup = rule.NextQuestionGroup;
+      if (sourceQuestion) {
+        if (sourceQuestion.QuestionType === "Matrix") {
+          // For Matrix questions, store enhanced jump logic
+          if (!sourceQuestion.matrixJumpLogic) {
+            sourceQuestion.matrixJumpLogic = [];
+          }
+          sourceQuestion.matrixJumpLogic.push({
+            answerKey: rule.AnswerKey,
+            matrixRowPair: rule.MatrixRowPair || "",
+            matrixColumnPair: rule.MatrixColumnPair || "",
+            jumpToGroup: rule.NextQuestionGroup,
+            conditions: rule.Conditions || "",
+          });
+        } else {
+          // Regular MCQ logic
+          if (sourceQuestion.Options) {
+            const targetOption = sourceQuestion.Options.find(
+              (opt) => opt.key === rule.AnswerKey
+            );
+            if (targetOption) {
+              targetOption.jumpToGroup = rule.NextQuestionGroup;
+            }
+          }
         }
       }
     });
@@ -284,23 +309,62 @@ const CustomField = (props: CustomFieldProps) => {
     columnIndex,
     matrixType = "single"
   ) => {
+    console.log("Matrix change:", { questionKey, rowIndex, columnIndex, matrixType });
+    
+    // Find the question to check for exclusive columns
+    const question = questionData.find(q => q.QuestionKey === questionKey);
+    const isExclusiveColumn = question?.MatrixColumns?.[columnIndex]?.isExclusive || false;
+    
+    console.log("Column exclusive status:", { columnIndex, isExclusive: isExclusiveColumn });
+    
     setAnswers((prev) => {
       const currentMatrix = prev[questionKey] || {};
+      let newMatrix;
+      
       if (matrixType === "multiple") {
         const currentRow = currentMatrix[rowIndex] || [];
-        const updatedRow = currentRow.includes(columnIndex)
-          ? currentRow.filter((col) => col !== columnIndex)
-          : [...currentRow, columnIndex];
-        return {
-          ...prev,
-          [questionKey]: { ...currentMatrix, [rowIndex]: updatedRow },
-        };
+        
+        if (isExclusiveColumn) {
+          // Exclusive column selected - clear all other selections in this row
+          if (currentRow.includes(columnIndex)) {
+            // If exclusive column was already selected, deselect it
+            newMatrix = { ...currentMatrix, [rowIndex]: [] };
+            console.log("Deselected exclusive column");
+          } else {
+            // Select only the exclusive column, clear all others in this row
+            newMatrix = { ...currentMatrix, [rowIndex]: [columnIndex] };
+            console.log("Selected exclusive column, cleared others in row");
+          }
+        } else {
+          // Check if any exclusive column is currently selected in this row
+          const hasExclusiveSelected = currentRow.some(colIdx => 
+            question?.MatrixColumns?.[colIdx]?.isExclusive
+          );
+          
+          if (hasExclusiveSelected) {
+            // If an exclusive column is selected, replace it with this non-exclusive selection
+            const updatedRow = currentRow.includes(columnIndex)
+              ? currentRow.filter((col) => col !== columnIndex)
+              : [columnIndex]; // Only select this column, removing exclusive
+            newMatrix = { ...currentMatrix, [rowIndex]: updatedRow };
+            console.log("Replaced exclusive selection with non-exclusive");
+          } else {
+            // Normal multi-select behavior
+            const updatedRow = currentRow.includes(columnIndex)
+              ? currentRow.filter((col) => col !== columnIndex)
+              : [...currentRow, columnIndex];
+            newMatrix = { ...currentMatrix, [rowIndex]: updatedRow };
+            console.log("Normal multi-select toggle");
+          }
+        }
       } else {
-        return {
-          ...prev,
-          [questionKey]: { ...currentMatrix, [rowIndex]: columnIndex },
-        };
+        // Single selection matrix - normal behavior (exclusive logic not typically needed)
+        newMatrix = { ...currentMatrix, [rowIndex]: columnIndex };
+        console.log("Single-select matrix change");
       }
+      
+      console.log("New matrix answer:", newMatrix);
+      return { ...prev, [questionKey]: newMatrix };
     });
   };
 
@@ -347,6 +411,8 @@ const CustomField = (props: CustomFieldProps) => {
       map.get(targetKey).push({
         sourceKey: rule.QuestionKey,
         triggerAnswerKey: rule.AnswerKey,
+        matrixRowPair: rule.MatrixRowPair || "",
+        matrixColumnPair: rule.MatrixColumnPair || "",
         shouldShow: rule.Visibility.toLowerCase() === "show",
       });
     });
@@ -355,20 +421,157 @@ const CustomField = (props: CustomFieldProps) => {
 
   const isQuestionVisible = (question) => {
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
-    if (!rulesForThisQuestion) {
+    console.log(`Checking visibility for question ${question.QuestionKey}:`, { 
+      rules: rulesForThisQuestion, 
+      defaultVisible: question.defaultVisible,
+      questionText: question.Question
+    });
+    
+    // If no rules exist, use default visibility
+    if (!rulesForThisQuestion || rulesForThisQuestion.length === 0) {
       return question.defaultVisible;
     }
+    
+    // If there are show/hide rules, start with false (hidden) and check if any rule makes it visible
+    let shouldShow = false;
+    
     for (const rule of rulesForThisQuestion) {
+      const sourceQuestion = questionData.find(q => q.QuestionKey === rule.sourceKey);
       const userAnswer = answers[rule.sourceKey];
-      if (!userAnswer) continue;
-      let conditionMet = false;
-      if (Array.isArray(userAnswer)) {
-        conditionMet = userAnswer.includes(rule.triggerAnswerKey);
-      } else {
-        conditionMet = userAnswer === rule.triggerAnswerKey;
+      
+      console.log("Checking rule:", { 
+        rule, 
+        sourceQuestion: sourceQuestion?.QuestionType, 
+        userAnswer,
+        questionText: sourceQuestion?.Question 
+      });
+      
+      if (!userAnswer) {
+        console.log("No user answer for source question");
+        continue;
       }
+      
+      let conditionMet = false;
+      
+      if (sourceQuestion?.QuestionType === "Matrix") {
+        // For Matrix questions with enhanced cell-specific logic
+        conditionMet = checkMatrixConditionEnhanced(userAnswer, rule, sourceQuestion);
+      } else {
+        // Regular question logic
+        if (Array.isArray(userAnswer)) {
+          conditionMet = userAnswer.includes(rule.triggerAnswerKey);
+        } else {
+          conditionMet = userAnswer === rule.triggerAnswerKey;
+        }
+      }
+      
+      console.log("Condition result:", { conditionMet, shouldShow: rule.shouldShow });
+      
       if (conditionMet && rule.shouldShow) {
-        return true;
+        shouldShow = true;
+        break; // If any rule says show, then show
+      }
+    }
+    
+    console.log(`Final visibility for ${question.Question}:`, shouldShow);
+    return shouldShow;
+  };
+
+  // Enhanced helper function to check matrix conditions with cell-specific logic
+  const checkMatrixConditionEnhanced = (matrixAnswer, rule, sourceQuestion) => {
+    console.log("Checking matrix condition:", { matrixAnswer, rule, sourceQuestion });
+    
+    // Check if we have specific cell logic (MatrixRowPair + MatrixColumnPair)
+    if (rule.matrixColumnPair) {
+      // Cell-specific logic: must match exact row + column combination
+      return checkSpecificCellLogic(matrixAnswer, rule, sourceQuestion);
+    } else {
+      // Row or Column-only logic (backward compatibility)
+      return checkRowOrColumnLogic(matrixAnswer, rule.triggerAnswerKey, sourceQuestion);
+    }
+  };
+
+  // Check for specific cell intersection logic
+  const checkSpecificCellLogic = (matrixAnswer, rule, sourceQuestion) => {
+    const targetRowKey = rule.triggerAnswerKey; // This is the row key
+    const targetColumnKey = rule.matrixColumnPair; // This is the column key
+    
+    console.log("=== CELL LOGIC CHECK ===");
+    console.log("Target keys:", { targetRowKey, targetColumnKey });
+    console.log("Matrix answer:", matrixAnswer);
+    console.log("Question rows:", sourceQuestion.MatrixRows);
+    console.log("Question columns:", sourceQuestion.MatrixColumns);
+    
+    // Find the row and column by their keys
+    const targetRow = sourceQuestion.MatrixRows.find(row => row.key === targetRowKey);
+    const targetColumn = sourceQuestion.MatrixColumns.find(col => col.key === targetColumnKey);
+    
+    console.log("Found target row:", targetRow);
+    console.log("Found target column:", targetColumn);
+    
+    if (!targetRow || !targetColumn) {
+      console.log("❌ Row or column not found");
+      return false;
+    }
+    
+    // Get the UI indexes (sorted array positions)
+    const rowIndex = sourceQuestion.MatrixRows.indexOf(targetRow);
+    const columnIndex = sourceQuestion.MatrixColumns.indexOf(targetColumn);
+    
+    console.log("UI indexes:", { rowIndex, columnIndex });
+    
+    if (rowIndex === -1 || columnIndex === -1) {
+      console.log("❌ Row or column index not found");
+      return false;
+    }
+    
+    // Check if this specific cell is selected
+    const rowAnswer = matrixAnswer[rowIndex];
+    console.log(`Row ${rowIndex} answer:`, rowAnswer);
+    
+    if (rowAnswer === undefined || rowAnswer === null) {
+      console.log("❌ No answer for this row");
+      return false;
+    }
+    
+    let isSelected = false;
+    
+    if (Array.isArray(rowAnswer)) {
+      // Multiple selection matrix
+      isSelected = rowAnswer.includes(columnIndex);
+      console.log("Multi-select check:", { rowAnswer, columnIndex, isSelected });
+    } else {
+      // Single selection matrix
+      isSelected = rowAnswer === columnIndex;
+      console.log("Single-select check:", { rowAnswer, columnIndex, isSelected });
+    }
+    
+    console.log(`✅ Cell logic result: ${isSelected}`);
+    console.log("=== END CELL LOGIC CHECK ===");
+    
+    return isSelected;
+  };
+
+  // Check for row-only or column-only logic (backward compatibility)
+  const checkRowOrColumnLogic = (matrixAnswer, triggerAnswerKey, sourceQuestion) => {
+    for (const [rowIndex, columnSelection] of Object.entries(matrixAnswer)) {
+      const row = sourceQuestion.MatrixRows[parseInt(rowIndex)];
+      if (!row) continue;
+      
+      if (Array.isArray(columnSelection)) {
+        // Multiple selection matrix
+        for (const colIndex of columnSelection) {
+          const column = sourceQuestion.MatrixColumns[colIndex];
+          if (column && (row.key === triggerAnswerKey || column.key === triggerAnswerKey)) {
+            return true;
+          }
+        }
+      } else {
+        // Single selection matrix
+        const column = sourceQuestion.MatrixColumns[columnSelection];
+        if (column && (row.key === triggerAnswerKey || column.key === triggerAnswerKey)) {
+          return true;
+        }
       }
     }
     return false;
@@ -400,16 +603,31 @@ const CustomField = (props: CustomFieldProps) => {
     }
 
     let nextGroupIndex = currentGroupIndex + 1;
+    
+    // Check for jump logic in current group questions
     for (const question of currentGroup.questions) {
-      const userAnswerKey = answers[question.QuestionKey];
-      if (userAnswerKey && question.Options) {
+      const userAnswer = answers[question.QuestionKey];
+      
+      if (!userAnswer) continue;
+      
+      if (question.QuestionType === "Matrix" && question.matrixJumpLogic) {
+        // Handle Matrix jump logic
+        const jumpTarget = checkMatrixJumpLogic(userAnswer, question.matrixJumpLogic, question);
+        if (jumpTarget) {
+          const jumpToGroupIndex = questionGroupKeyToIndexMap.get(jumpTarget);
+          if (jumpToGroupIndex !== undefined) {
+            nextGroupIndex = jumpToGroupIndex;
+            break;
+          }
+        }
+      } else if (question.Options) {
+        // Handle regular MCQ jump logic
         const selectedOption = question.Options.find(
-          (opt) => opt.key === userAnswerKey
+          (opt) => opt.key === userAnswer
         );
         if (selectedOption?.jumpToGroup) {
           const targetGroupKey = selectedOption.jumpToGroup;
-          const jumpToGroupIndex =
-            questionGroupKeyToIndexMap.get(targetGroupKey);
+          const jumpToGroupIndex = questionGroupKeyToIndexMap.get(targetGroupKey);
           if (jumpToGroupIndex !== undefined) {
             nextGroupIndex = jumpToGroupIndex;
             break;
@@ -417,11 +635,68 @@ const CustomField = (props: CustomFieldProps) => {
         }
       }
     }
+    
     if (nextGroupIndex >= groupedQuestions.length) {
       handleSubmit();
     } else {
       setCurrentGroupIndex(nextGroupIndex);
     }
+  };
+
+  // Enhanced helper function to check matrix jump logic with cell-specific logic
+  const checkMatrixJumpLogic = (matrixAnswer, jumpLogicRules, sourceQuestion) => {
+    for (const rule of jumpLogicRules) {
+      console.log("Checking jump rule:", rule);
+      
+      // Check if we have specific cell logic (MatrixRowPair + MatrixColumnPair)
+      if (rule.matrixColumnPair) {
+        // Cell-specific jump logic
+        const targetRowKey = rule.answerKey;
+        const targetColumnKey = rule.matrixColumnPair;
+        
+        // Find the row and column indexes
+        const rowIndex = sourceQuestion.MatrixRows.findIndex(row => row.key === targetRowKey);
+        const columnIndex = sourceQuestion.MatrixColumns.findIndex(col => col.key === targetColumnKey);
+        
+        if (rowIndex !== -1 && columnIndex !== -1) {
+          const rowAnswer = matrixAnswer[rowIndex];
+          if (rowAnswer !== undefined) {
+            let cellSelected = false;
+            if (Array.isArray(rowAnswer)) {
+              cellSelected = rowAnswer.includes(columnIndex);
+            } else {
+              cellSelected = rowAnswer === columnIndex;
+            }
+            
+            if (cellSelected) {
+              console.log("Jump triggered by cell selection");
+              return rule.jumpToGroup;
+            }
+          }
+        }
+      } else {
+        // Row or Column-only jump logic (backward compatibility)
+        for (const [rowIndex, columnSelection] of Object.entries(matrixAnswer)) {
+          const row = sourceQuestion.MatrixRows[parseInt(rowIndex)];
+          if (!row) continue;
+          
+          if (Array.isArray(columnSelection)) {
+            for (const colIndex of columnSelection) {
+              const column = sourceQuestion.MatrixColumns[colIndex];
+              if (column && (row.key === rule.answerKey || column.key === rule.answerKey)) {
+                return rule.jumpToGroup;
+              }
+            }
+          } else {
+            const column = sourceQuestion.MatrixColumns[columnSelection];
+            if (column && (row.key === rule.answerKey || column.key === rule.answerKey)) {
+              return rule.jumpToGroup;
+            }
+          }
+        }
+      }
+    }
+    return null;
   };
 
   const handleSubmit = () => {
@@ -545,8 +820,21 @@ const CustomField = (props: CustomFieldProps) => {
                     <TableRow>
                       <TableCell sx={{ fontWeight: "bold", bgcolor: "grey.50" }} />
                       {question.MatrixColumns.map((col) => (
-                        <TableCell key={col.key} align="center" sx={{ fontWeight: "bold", bgcolor: "grey.50" }}>
+                        <TableCell 
+                          key={col.key} 
+                          align="center" 
+                          sx={{ 
+                            fontWeight: "bold", 
+                            bgcolor: col.isExclusive ? "orange.50" : "grey.50",
+                            borderLeft: col.isExclusive ? "3px solid orange" : "none"
+                          }}
+                        >
                           {col.text}
+                          {col.isExclusive && (
+                            <Typography variant="caption" display="block" color="orange.main">
+                              (Exclusive)
+                            </Typography>
+                          )}
                         </TableCell>
                       ))}
                     </TableRow>
@@ -556,17 +844,35 @@ const CustomField = (props: CustomFieldProps) => {
                       <TableRow key={row.key} hover>
                         <TableCell sx={{ fontWeight: "medium" }}>{row.text}</TableCell>
                         {question.MatrixColumns.map((col, cIdx) => (
-                          <TableCell key={col.key} align="center">
+                          <TableCell 
+                            key={col.key} 
+                            align="center"
+                            sx={{ 
+                              bgcolor: col.isExclusive ? "orange.25" : "inherit"
+                            }}
+                          >
                             {question.MatrixType === "multiple" ? (
                               <Checkbox
                                 checked={(((answers[questionKey] || {})[rIdx] || [])).includes(cIdx)}
                                 onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "multiple")}
+                                sx={{
+                                  color: col.isExclusive ? "orange.main" : "inherit",
+                                  '&.Mui-checked': {
+                                    color: col.isExclusive ? "orange.main" : "primary.main"
+                                  }
+                                }}
                               />
                             ) : (
                               <Radio
                                 checked={(answers[questionKey] || {})[rIdx] === cIdx}
                                 onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "single")}
                                 name={`matrix-${questionKey}-row-${rIdx}`}
+                                sx={{
+                                  color: col.isExclusive ? "orange.main" : "inherit",
+                                  '&.Mui-checked': {
+                                    color: col.isExclusive ? "orange.main" : "primary.main"
+                                  }
+                                }}
                               />
                             )}
                           </TableCell>
@@ -739,7 +1045,11 @@ const CustomField = (props: CustomFieldProps) => {
                     </Typography>
                     <Divider sx={{ mb: 3 }} />
                     {groupedQuestions[currentGroupIndex].questions
-                      .filter((q) => isQuestionVisible(q))
+                      .filter((q) => {
+                        const visible = isQuestionVisible(q);
+                        console.log(`Question "${q.Question}" visibility:`, visible);
+                        return visible;
+                      })
                       .map((question, qIndex) =>
                         renderQuestion(question, qIndex)
                       )}
