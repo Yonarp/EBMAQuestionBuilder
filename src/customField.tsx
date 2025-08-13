@@ -184,10 +184,10 @@ const CustomField = (props: CustomFieldProps) => {
     );
   };
 
-  const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
+const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     const questionMap = new Map();
 
-    // Initialize questions with empty arrays for Matrix data
+    // 1. Initialize questions
     rawQuestions.forEach((item) => {
       if (item.QuestionKey && !questionMap.has(item.QuestionKey)) {
         questionMap.set(item.QuestionKey, {
@@ -200,12 +200,11 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // Process answers and categorize them properly
+    // 2. Process answers and categorize them
     allAnswers.forEach((answer) => {
       const question = questionMap.get(answer.QuestionKey);
       if (question) {
         if (question.QuestionType === "Matrix") {
-          // Handle Matrix rows and columns using MatrixType field with separate ordering
           if (answer.MatrixType === "row") {
             question.MatrixRows.push({
               key: answer.AnswerKey,
@@ -217,11 +216,12 @@ const CustomField = (props: CustomFieldProps) => {
               key: answer.AnswerKey,
               text: answer.Answer,
               order: parseInt(answer.MatrixColumnOrder || "0"),
-              isExclusive: answer.MatrixExcludeCell === "1" || answer.MatrixExcludeCell === 1,
+              // Note: We can't determine isExclusive here yet, as the flag
+              // is incorrectly located in logicRules. We'll do it in a later step.
+              isExclusive: false, 
             });
           }
         } else {
-          // Regular options for other question types
           question.Options.push({
             key: answer.AnswerKey,
             text: answer.Answer,
@@ -231,13 +231,31 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // Handle jump logic for both MCQ and Matrix questions
-    const jumpRules = allLogicRules.filter((r) => r.Action === "JUMP");
-    jumpRules.forEach((rule) => {
+    // 3. Process logic rules for jumps AND to find the misplaced exclusive flag
+    allLogicRules.forEach((rule) => {
       const sourceQuestion = questionMap.get(rule.QuestionKey);
-      if (sourceQuestion) {
+      if (!sourceQuestion) return;
+
+      // --- FIX FOR EXCLUSIVE FLAG ---
+      // Check if this rule defines a column as exclusive
+      if (
+        sourceQuestion.QuestionType === "Matrix" &&
+        (rule.MatrixExcludeCell === "1" || rule.MatrixExcludeCell === 1) &&
+        rule.MatrixColumnPair
+      ) {
+        // Find the column in our question that this rule applies to
+        const targetColumn = sourceQuestion.MatrixColumns.find(
+          (col) => col.key === rule.MatrixColumnPair
+        );
+        if (targetColumn) {
+          console.log(`Found exclusive column from logic rule: ${targetColumn.text}`);
+          targetColumn.isExclusive = true;
+        }
+      }
+
+      // --- Process JUMP logic (as before) ---
+      if (rule.Action === "JUMP") {
         if (sourceQuestion.QuestionType === "Matrix") {
-          // For Matrix questions, store enhanced jump logic
           if (!sourceQuestion.matrixJumpLogic) {
             sourceQuestion.matrixJumpLogic = [];
           }
@@ -249,7 +267,6 @@ const CustomField = (props: CustomFieldProps) => {
             conditions: rule.Conditions || "",
           });
         } else {
-          // Regular MCQ logic
           if (sourceQuestion.Options) {
             const targetOption = sourceQuestion.Options.find(
               (opt) => opt.key === rule.AnswerKey
@@ -262,7 +279,7 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // Sort all arrays by their respective order fields
+    // 4. Sort all arrays by their respective order fields
     questionMap.forEach((q) => {
       q.Options?.sort((a, b) => a.order - b.order);
       q.MatrixRows?.sort((a, b) => a.order - b.order);
@@ -307,63 +324,63 @@ const CustomField = (props: CustomFieldProps) => {
     questionKey,
     rowIndex,
     columnIndex,
-    matrixType = "single"
+    matrixType = "single" // This logic is primarily for single-select as requested
   ) => {
-    console.log("Matrix change:", { questionKey, rowIndex, columnIndex, matrixType });
-    
-    // Find the question to check for exclusive columns
-    const question = questionData.find(q => q.QuestionKey === questionKey);
-    const isExclusiveColumn = question?.MatrixColumns?.[columnIndex]?.isExclusive || false;
-    
-    console.log("Column exclusive status:", { columnIndex, isExclusive: isExclusiveColumn });
-    
+    const question = questionData.find((q) => q.QuestionKey === questionKey);
+    if (!question) return;
+
+    const isExclusiveColumn =
+      question.MatrixColumns?.[columnIndex]?.isExclusive || false;
+
     setAnswers((prev) => {
-      const currentMatrix = prev[questionKey] || {};
+      const prevMatrix = prev[questionKey] || {};
       let newMatrix;
-      
-      if (matrixType === "multiple") {
-        const currentRow = currentMatrix[rowIndex] || [];
-        
-        if (isExclusiveColumn) {
-          // Exclusive column selected - clear all other selections in this row
-          if (currentRow.includes(columnIndex)) {
-            // If exclusive column was already selected, deselect it
-            newMatrix = { ...currentMatrix, [rowIndex]: [] };
-            console.log("Deselected exclusive column");
-          } else {
-            // Select only the exclusive column, clear all others in this row
-            newMatrix = { ...currentMatrix, [rowIndex]: [columnIndex] };
-            console.log("Selected exclusive column, cleared others in row");
-          }
+
+      // --- 1. LOGIC FOR EXCLUSIVE SELECTIONS ---
+      // If the user clicks a cell in a column marked as "exclusive".
+      if (isExclusiveColumn) {
+        // Check if this exact exclusive cell is ALREADY the only thing selected.
+        // If so, the user is clicking it again to DESELECT it.
+        if (
+          Object.keys(prevMatrix).length === 1 &&
+          prevMatrix[rowIndex] === columnIndex
+        ) {
+          // Clear the entire matrix answer, leaving it empty.
+          newMatrix = {};
+          console.log("Deselected the exclusive option. Matrix is now empty.");
         } else {
-          // Check if any exclusive column is currently selected in this row
-          const hasExclusiveSelected = currentRow.some(colIdx => 
-            question?.MatrixColumns?.[colIdx]?.isExclusive
+          // Otherwise, select this exclusive option and clear everything else.
+          // This is the "nuke" operation that clears all other rows.
+          newMatrix = { [rowIndex]: columnIndex };
+          console.log(
+            "Selected exclusive option. All other matrix answers cleared."
           );
-          
-          if (hasExclusiveSelected) {
-            // If an exclusive column is selected, replace it with this non-exclusive selection
-            const updatedRow = currentRow.includes(columnIndex)
-              ? currentRow.filter((col) => col !== columnIndex)
-              : [columnIndex]; // Only select this column, removing exclusive
-            newMatrix = { ...currentMatrix, [rowIndex]: updatedRow };
-            console.log("Replaced exclusive selection with non-exclusive");
-          } else {
-            // Normal multi-select behavior
-            const updatedRow = currentRow.includes(columnIndex)
-              ? currentRow.filter((col) => col !== columnIndex)
-              : [...currentRow, columnIndex];
-            newMatrix = { ...currentMatrix, [rowIndex]: updatedRow };
-            console.log("Normal multi-select toggle");
+        }
+      }
+      // --- 2. LOGIC FOR STANDARD (NON-EXCLUSIVE) SELECTIONS ---
+      else {
+        // Start with a copy of the previous answers for this matrix.
+        newMatrix = { ...prevMatrix };
+
+        // **Crucial Step:** Before setting the new answer, we must check for
+        // and REMOVE any existing exclusive selection from the entire matrix.
+        // This prevents an exclusive and non-exclusive answer from co-existing.
+        for (const rIdx in newMatrix) {
+          const cIdx = newMatrix[rIdx];
+          // If a selected answer is in an exclusive column, delete it.
+          if (question.MatrixColumns?.[cIdx]?.isExclusive) {
+            console.log("Clearing previously selected exclusive option.");
+            delete newMatrix[rIdx];
           }
         }
-      } else {
-        // Single selection matrix - normal behavior (exclusive logic not typically needed)
-        newMatrix = { ...currentMatrix, [rowIndex]: columnIndex };
-        console.log("Single-select matrix change");
+
+        // Now, set the new standard (non-exclusive) selection for the current row.
+        // For a single-select matrix, this will add/update the selection for this row.
+        newMatrix[rowIndex] = columnIndex;
+        console.log(`Set standard selection for row ${rowIndex}.`);
       }
-      
-      console.log("New matrix answer:", newMatrix);
+
+      console.log("Final new matrix answer:", newMatrix);
       return { ...prev, [questionKey]: newMatrix };
     });
   };
@@ -423,33 +440,20 @@ const CustomField = (props: CustomFieldProps) => {
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
     console.log(`Checking visibility for question ${question.QuestionKey}:`, { 
       rules: rulesForThisQuestion, 
-      defaultVisible: question.defaultVisible,
-      questionText: question.Question
+      defaultVisible: question.defaultVisible 
     });
     
-    // If no rules exist, use default visibility
-    if (!rulesForThisQuestion || rulesForThisQuestion.length === 0) {
+    if (!rulesForThisQuestion) {
       return question.defaultVisible;
     }
-    
-    // If there are show/hide rules, start with false (hidden) and check if any rule makes it visible
-    let shouldShow = false;
     
     for (const rule of rulesForThisQuestion) {
       const sourceQuestion = questionData.find(q => q.QuestionKey === rule.sourceKey);
       const userAnswer = answers[rule.sourceKey];
       
-      console.log("Checking rule:", { 
-        rule, 
-        sourceQuestion: sourceQuestion?.QuestionType, 
-        userAnswer,
-        questionText: sourceQuestion?.Question 
-      });
+      console.log("Checking rule:", { rule, sourceQuestion: sourceQuestion?.QuestionType, userAnswer });
       
-      if (!userAnswer) {
-        console.log("No user answer for source question");
-        continue;
-      }
+      if (!userAnswer) continue;
       
       let conditionMet = false;
       
@@ -468,13 +472,10 @@ const CustomField = (props: CustomFieldProps) => {
       console.log("Condition result:", { conditionMet, shouldShow: rule.shouldShow });
       
       if (conditionMet && rule.shouldShow) {
-        shouldShow = true;
-        break; // If any rule says show, then show
+        return true;
       }
     }
-    
-    console.log(`Final visibility for ${question.Question}:`, shouldShow);
-    return shouldShow;
+    return false;
   };
 
   // Enhanced helper function to check matrix conditions with cell-specific logic
@@ -492,63 +493,56 @@ const CustomField = (props: CustomFieldProps) => {
   };
 
   // Check for specific cell intersection logic
+  // New, corrected function
   const checkSpecificCellLogic = (matrixAnswer, rule, sourceQuestion) => {
-    const targetRowKey = rule.triggerAnswerKey; // This is the row key
-    const targetColumnKey = rule.matrixColumnPair; // This is the column key
+    const targetRowKey = rule.matrixRowPair; // <--- CORRECTED LINE
+    const targetColumnKey = rule.matrixColumnPair;
     
     console.log("=== CELL LOGIC CHECK ===");
     console.log("Target keys:", { targetRowKey, targetColumnKey });
     console.log("Matrix answer:", matrixAnswer);
     console.log("Question rows:", sourceQuestion.MatrixRows);
     console.log("Question columns:", sourceQuestion.MatrixColumns);
-    
-    // Find the row and column by their keys
+
     const targetRow = sourceQuestion.MatrixRows.find(row => row.key === targetRowKey);
     const targetColumn = sourceQuestion.MatrixColumns.find(col => col.key === targetColumnKey);
     
     console.log("Found target row:", targetRow);
     console.log("Found target column:", targetColumn);
-    
+
     if (!targetRow || !targetColumn) {
       console.log("❌ Row or column not found");
       return false;
     }
     
-    // Get the UI indexes (sorted array positions)
     const rowIndex = sourceQuestion.MatrixRows.indexOf(targetRow);
     const columnIndex = sourceQuestion.MatrixColumns.indexOf(targetColumn);
     
     console.log("UI indexes:", { rowIndex, columnIndex });
-    
+
     if (rowIndex === -1 || columnIndex === -1) {
       console.log("❌ Row or column index not found");
       return false;
     }
-    
-    // Check if this specific cell is selected
+
     const rowAnswer = matrixAnswer[rowIndex];
     console.log(`Row ${rowIndex} answer:`, rowAnswer);
-    
+
     if (rowAnswer === undefined || rowAnswer === null) {
       console.log("❌ No answer for this row");
       return false;
     }
-    
+
     let isSelected = false;
-    
     if (Array.isArray(rowAnswer)) {
-      // Multiple selection matrix
       isSelected = rowAnswer.includes(columnIndex);
-      console.log("Multi-select check:", { rowAnswer, columnIndex, isSelected });
     } else {
-      // Single selection matrix
       isSelected = rowAnswer === columnIndex;
-      console.log("Single-select check:", { rowAnswer, columnIndex, isSelected });
     }
     
     console.log(`✅ Cell logic result: ${isSelected}`);
     console.log("=== END CELL LOGIC CHECK ===");
-    
+
     return isSelected;
   };
 
@@ -1045,11 +1039,7 @@ const CustomField = (props: CustomFieldProps) => {
                     </Typography>
                     <Divider sx={{ mb: 3 }} />
                     {groupedQuestions[currentGroupIndex].questions
-                      .filter((q) => {
-                        const visible = isQuestionVisible(q);
-                        console.log(`Question "${q.Question}" visibility:`, visible);
-                        return visible;
-                      })
+                      .filter((q) => isQuestionVisible(q))
                       .map((question, qIndex) =>
                         renderQuestion(question, qIndex)
                       )}
