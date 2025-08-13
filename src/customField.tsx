@@ -79,7 +79,9 @@ interface QuestionGroup {
 
 // --- DEDICATED SLIDER COMPONENT ---
 const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
-  const defaultValue = question.MinRange ?? 1;
+  const min = Number(question.MinRange) || 1;
+  const max = Number(question.MaxRange) || 10;
+  const defaultValue = min;
   const [sliderValue, setSliderValue] = useState(
     typeof initialValue === "number" ? initialValue : defaultValue
   );
@@ -101,24 +103,24 @@ const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
   return (
     <Box sx={{ px: 2 }}>
       <Typography variant="body2" gutterBottom>
-        Rate from {question.MinRange || 1} to {question.MaxRange || 10}
+        Rate from {min} to {max}
       </Typography>
       <Slider
         value={sliderValue}
         onChange={handleSliderChange}
         onChangeCommitted={handleSliderCommit}
         step={1}
-        min={question.MinRange || 1}
-        max={question.MaxRange || 10}
+        min={min}
+        max={max}
         valueLabelDisplay="auto"
         marks={[
           {
-            value: question.MinRange || 1,
-            label: (question.MinRange || 1).toString(),
+            value: min,
+            label: min.toString(),
           },
           {
-            value: question.MaxRange || 10,
-            label: (question.MaxRange || 10).toString(),
+            value: max,
+            label: max.toString(),
           },
         ]}
       />
@@ -150,8 +152,7 @@ const CustomField = (props: CustomFieldProps) => {
     setAnswers({});
     setErrors({});
 
-    const questionnaireKey =
-      five.form.Questionaires["Questionaire.QuestionaireKey"];
+    const questionnaireKey = five.form?.Questionaires?.["Questionaire.QuestionaireKey"] ? five.form.Questionaires["Questionaire.QuestionaireKey"] : five.variable.QuestionnairesKey;
     const questionObj = { Key: questionnaireKey };
 
     await five.executeFunction(
@@ -164,9 +165,9 @@ const CustomField = (props: CustomFieldProps) => {
         const data = JSON.parse(result.serverResponse.results);
         console.log("Logging Data", data);
 
-        const rawQuestions = data.questions.records;
-        const allAnswers = data.answers.records;
-        const allLogicRules = data.logicRules.records;
+        const rawQuestions = Array.isArray(data.questions.records) ? data.questions.records : [];
+        const allAnswers = Array.isArray(data.answers.records) ? data.answers.records : [];
+        const allLogicRules = Array.isArray(data.logicRules.records) ? data.logicRules.records : [];
 
         setLogicRules(allLogicRules);
         const processed = processAndMergeData(
@@ -201,7 +202,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     });
 
     // 2. Process answers and categorize them
-    allAnswers.forEach((answer) => {
+    (allAnswers || []).forEach((answer) => {
       const question = questionMap.get(answer.QuestionKey);
       if (question) {
         if (question.QuestionType === "Matrix") {
@@ -418,23 +419,23 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
   }, [questionData]);
 
   const visibilityRules = useMemo(() => {
-    const map = new Map();
-    const showHideRules = logicRules.filter((r) => r.Action === "SHOW_HIDE");
-    showHideRules.forEach((rule) => {
-      const targetKey = rule.NextQuestion;
-      if (!map.has(targetKey)) {
-        map.set(targetKey, []);
-      }
-      map.get(targetKey).push({
-        sourceKey: rule.QuestionKey,
-        triggerAnswerKey: rule.AnswerKey,
-        matrixRowPair: rule.MatrixRowPair || "",
-        matrixColumnPair: rule.MatrixColumnPair || "",
-        shouldShow: rule.Visibility.toLowerCase() === "show",
-      });
+  const map = new Map();
+  const showHideRules = Array.isArray(logicRules) ? logicRules.filter((r) => r.Action === "SHOW_HIDE") : [];
+  showHideRules.forEach((rule) => {
+    const targetKey = rule.NextQuestion;
+    if (!map.has(targetKey)) {
+      map.set(targetKey, []);
+    }
+    map.get(targetKey).push({
+      sourceKey: rule.QuestionKey,
+      triggerAnswerKey: rule.AnswerKey,
+      matrixRowPair: rule.MatrixRowPair || "",
+      matrixColumnPair: rule.MatrixColumnPair || "",
+      shouldShow: rule.Visibility.toLowerCase() === "show",
     });
-    return map;
-  }, [logicRules]);
+  });
+  return map;
+}, [logicRules]);
 
   const isQuestionVisible = (question) => {
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
@@ -579,6 +580,17 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     return map;
   }, [groupedQuestions]);
 
+  const [groupHistory, setGroupHistory] = useState([0]);
+  
+  const handleBack = () => {
+    setGroupHistory((prev) => {
+      if (prev.length <= 1) return prev;
+      const newHistory = prev.slice(0, -1);
+      setCurrentGroupIndex(newHistory[newHistory.length - 1]);
+      return newHistory;
+    });
+  };
+
   const handleNext = () => {
     const currentGroup = groupedQuestions[currentGroupIndex];
     const visibleQuestions = currentGroup.questions.filter((q) =>
@@ -634,6 +646,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
       handleSubmit();
     } else {
       setCurrentGroupIndex(nextGroupIndex);
+      setGroupHistory((prev) => [...prev, nextGroupIndex]);
     }
   };
 
@@ -1016,7 +1029,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
       <Dialog
         open={dialogOpen}
         onClose={handleDialogClose}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
       >
         <DialogTitle>{surveyTitle || "Survey"}</DialogTitle>
@@ -1051,9 +1064,17 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         <DialogActions>
           <Button onClick={handleDialogClose}>Cancel</Button>
           {!loading && groupedQuestions.length > 0 && (
-            <Button variant="contained" onClick={handleNext}>
-              {isLastGroup ? "Submit Survey" : "Next"}
-            </Button>
+            <>
+              <Button
+                onClick={handleBack}
+                disabled={groupHistory.length <= 1}
+              >
+                Back
+              </Button>
+              <Button variant="contained" onClick={handleNext}>
+                {isLastGroup ? "Submit Survey" : "Next"}
+              </Button>
+            </>
           )}
         </DialogActions>
       </Dialog>
