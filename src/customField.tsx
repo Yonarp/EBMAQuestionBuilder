@@ -79,8 +79,8 @@ interface QuestionGroup {
 
 // --- DEDICATED SLIDER COMPONENT ---
 const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
-  const min = Number(question.MinRange) || 1;
-  const max = Number(question.MaxRange) || 10;
+  const min = Number(question.MinRange ?? 1);
+  const max = Number(question.MaxRange ?? 10);
   const defaultValue = min;
   const [sliderValue, setSliderValue] = useState(
     typeof initialValue === "number" ? initialValue : defaultValue
