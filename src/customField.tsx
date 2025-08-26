@@ -49,6 +49,8 @@ interface ProcessedQuestion {
   QuestionaireName: string;
   MinRange?: number;
   MaxRange?: number;
+  MinRangeText? : string;
+  MaxRangeText? : string;
   MatrixRows?: { key: string; text: string; order: number }[];
   MatrixColumns?: { key: string; text: string; order: number; isExclusive?: boolean }[];
   MatrixType?: "single" | "multiple";
@@ -106,6 +108,26 @@ const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
         Rate from {min} to {max}
       </Typography>
       <Slider
+        orientation="horizontal"
+        sx={{
+          "& .MuiSlider-markLabel": {
+            display: "inline-block !important",
+            width: "120px !important",
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            fontSize: "0.85em",
+            lineHeight: 1.2,
+            overflowWrap: "break-word",
+            textAlign: "center",
+          },
+          "& .MuiSlider-markLabel[data-index='0']": {
+            textAlign: "center",
+          },
+          "& .MuiSlider-markLabel[data-index='1']": {
+            transform: "translateX(-100%)", // right-align last label
+            textAlign: "right"
+          }
+        }}
         value={sliderValue}
         onChange={handleSliderChange}
         onChangeCommitted={handleSliderCommit}
@@ -116,11 +138,15 @@ const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
         marks={[
           {
             value: min,
-            label: min.toString(),
+            label: question.MinRangeText
+              ? `${min} – ${question.MinRangeText}`
+              : min.toString(),
           },
           {
             value: max,
-            label: max.toString(),
+            label: question.MaxRangeText
+              ? `${max} – ${question.MaxRangeText}`
+              : max.toString(),
           },
         ]}
       />
@@ -251,6 +277,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         if (targetColumn) {
           console.log(`Found exclusive column from logic rule: ${targetColumn.text}`);
           targetColumn.isExclusive = true;
+          targetColumn.exclusiveType = rule.ExclusiveType || "row";
         }
       }
 
@@ -325,63 +352,76 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     questionKey,
     rowIndex,
     columnIndex,
-    matrixType = "single" // This logic is primarily for single-select as requested
+    matrixType = "single"
   ) => {
     const question = questionData.find((q) => q.QuestionKey === questionKey);
     if (!question) return;
 
-    const isExclusiveColumn =
-      question.MatrixColumns?.[columnIndex]?.isExclusive || false;
+    //const isExclusiveColumn = question.MatrixColumns?.[columnIndex]?.isExclusive || false;
+    const colObj = question.MatrixColumns?.[columnIndex];
+    const isExclusiveColumn = colObj?.isExclusive || false;
+    const exclusiveType = colObj?.exclusiveType || "row";
 
     setAnswers((prev) => {
       const prevMatrix = prev[questionKey] || {};
-      let newMatrix;
+      let newMatrix = { ...prevMatrix };
 
-      // --- 1. LOGIC FOR EXCLUSIVE SELECTIONS ---
-      // If the user clicks a cell in a column marked as "exclusive".
-      if (isExclusiveColumn) {
-        // Check if this exact exclusive cell is ALREADY the only thing selected.
-        // If so, the user is clicking it again to DESELECT it.
-        if (
-          Object.keys(prevMatrix).length === 1 &&
-          prevMatrix[rowIndex] === columnIndex
-        ) {
-          // Clear the entire matrix answer, leaving it empty.
-          newMatrix = {};
-          console.log("Deselected the exclusive option. Matrix is now empty.");
+      if (matrixType === "multiple") {
+        // --- MULTIPLE SELECTION LOGIC ---
+        const currentRow = Array.isArray(newMatrix[rowIndex]) ? newMatrix[rowIndex] : [];
+
+        if (isExclusiveColumn) {
+          if (exclusiveType === "all") {
+            // Select exclusive column for this row, clear other selections in this row
+            newMatrix[rowIndex] = [columnIndex];
+            // Optionally clear all other rows for full exclusivity:
+            Object.keys(newMatrix).forEach((rIdx) => {
+              if (Number(rIdx) !== rowIndex) {
+                newMatrix[rIdx] = [];
+              }
+            });
+          } else {
+            // "row" exclusive: clear other selections in this row only
+            newMatrix[rowIndex] = [columnIndex];
+          }
         } else {
-          // Otherwise, select this exclusive option and clear everything else.
-          // This is the "nuke" operation that clears all other rows.
-          newMatrix = { [rowIndex]: columnIndex };
-          console.log(
-            "Selected exclusive option. All other matrix answers cleared."
+          // Remove exclusive columns if present
+          const filtered = currentRow.filter(
+            (idx) => !(question.MatrixColumns?.[idx]?.isExclusive)
           );
-        }
-      }
-      // --- 2. LOGIC FOR STANDARD (NON-EXCLUSIVE) SELECTIONS ---
-      else {
-        // Start with a copy of the previous answers for this matrix.
-        newMatrix = { ...prevMatrix };
-
-        // **Crucial Step:** Before setting the new answer, we must check for
-        // and REMOVE any existing exclusive selection from the entire matrix.
-        // This prevents an exclusive and non-exclusive answer from co-existing.
-        for (const rIdx in newMatrix) {
-          const cIdx = newMatrix[rIdx];
-          // If a selected answer is in an exclusive column, delete it.
-          if (question.MatrixColumns?.[cIdx]?.isExclusive) {
-            console.log("Clearing previously selected exclusive option.");
-            delete newMatrix[rIdx];
+          // Toggle selection
+          if (filtered.includes(columnIndex)) {
+            newMatrix[rowIndex] = filtered.filter((idx) => idx !== columnIndex);
+          } else {
+            newMatrix[rowIndex] = [...filtered, columnIndex];
           }
         }
-
-        // Now, set the new standard (non-exclusive) selection for the current row.
-        // For a single-select matrix, this will add/update the selection for this row.
-        newMatrix[rowIndex] = columnIndex;
-        console.log(`Set standard selection for row ${rowIndex}.`);
+      } else {
+        // --- SINGLE SELECTION LOGIC (radio) ---
+        if (isExclusiveColumn) {
+          if (exclusiveType === "all") {
+            newMatrix = { [rowIndex]: columnIndex };
+            Object.keys(newMatrix).forEach((rIdx) => {
+              if (Number(rIdx) !== rowIndex) {
+                newMatrix[rIdx] = null;
+              }
+            });
+          } else {
+            // "row" exclusive: clear other selections in this row only
+            newMatrix[rowIndex] = columnIndex;
+          }
+        } else {
+          // Remove exclusive selection if present
+          for (const rIdx in newMatrix) {
+            const cIdx = newMatrix[rIdx];
+            if (question.MatrixColumns?.[cIdx]?.isExclusive) {
+              delete newMatrix[rIdx];
+            }
+          }
+          newMatrix[rowIndex] = columnIndex;
+        }
       }
 
-      console.log("Final new matrix answer:", newMatrix);
       return { ...prev, [questionKey]: newMatrix };
     });
   };
@@ -719,9 +759,12 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     return (
       <Paper key={questionKey} elevation={1} sx={{ p: 3, mb: 2 }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            {index + 1}. {question.Question}
-          </Typography>
+          <Typography
+            variant="h6"
+            gutterBottom
+            component="div"
+            dangerouslySetInnerHTML={{ __html: `${question.Question}` }} // ${index + 1}. 
+          />
           <Chip
             label={question.QuestionType}
             size="small"
