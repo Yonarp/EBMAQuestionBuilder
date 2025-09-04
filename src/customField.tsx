@@ -49,17 +49,22 @@ interface ProcessedQuestion {
   QuestionaireName: string;
   MinRange?: number;
   MaxRange?: number;
-  MinRangeText? : string;
-  MaxRangeText? : string;
+  MinRangeText?: string;
+  MaxRangeText?: string;
   MatrixRows?: { key: string; text: string; order: number }[];
-  MatrixColumns?: { key: string; text: string; order: number; isExclusive?: boolean }[];
-  MatrixType?: "single" | "multiple";
-  matrixJumpLogic?: { 
-    answerKey: string; 
+  MatrixColumns?: {
+    key: string;
+    text: string;
+    order: number;
+    isExclusive?: boolean;
+  }[];
+  MatrixType?: "single" | "multiple" | "numerical"; //added extra matrix type as per Milads request
+  matrixJumpLogic?: {
+    answerKey: string;
     matrixRowPair: string;
     matrixColumnPair: string;
-    jumpToGroup: string; 
-    conditions: string 
+    jumpToGroup: string;
+    conditions: string;
   }[];
   defaultVisible: boolean;
   RegEx?: string;
@@ -125,8 +130,8 @@ const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
           },
           "& .MuiSlider-markLabel[data-index='1']": {
             transform: "translateX(-100%)", // right-align last label
-            textAlign: "right"
-          }
+            textAlign: "right",
+          },
         }}
         value={sliderValue}
         onChange={handleSliderChange}
@@ -178,7 +183,11 @@ const CustomField = (props: CustomFieldProps) => {
     setAnswers({});
     setErrors({});
 
-    const questionnaireKey = five.form?.Questionaires?.["Questionaire.QuestionaireKey"] ? five.form.Questionaires["Questionaire.QuestionaireKey"] : five.variable.QuestionnairesKey;
+    const questionnaireKey = five.form?.Questionaires?.[
+      "Questionaire.QuestionaireKey"
+    ]
+      ? five.form.Questionaires["Questionaire.QuestionaireKey"]
+      : five.variable.QuestionnairesKey;
     const questionObj = { Key: questionnaireKey };
 
     await five.executeFunction(
@@ -191,9 +200,15 @@ const CustomField = (props: CustomFieldProps) => {
         const data = JSON.parse(result.serverResponse.results);
         console.log("Logging Data", data);
 
-        const rawQuestions = Array.isArray(data.questions.records) ? data.questions.records : [];
-        const allAnswers = Array.isArray(data.answers.records) ? data.answers.records : [];
-        const allLogicRules = Array.isArray(data.logicRules.records) ? data.logicRules.records : [];
+        const rawQuestions = Array.isArray(data.questions.records)
+          ? data.questions.records
+          : [];
+        const allAnswers = Array.isArray(data.answers.records)
+          ? data.answers.records
+          : [];
+        const allLogicRules = Array.isArray(data.logicRules.records)
+          ? data.logicRules.records
+          : [];
 
         setLogicRules(allLogicRules);
         const processed = processAndMergeData(
@@ -211,9 +226,9 @@ const CustomField = (props: CustomFieldProps) => {
     );
   };
 
-const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
-    const questionMap = new Map();
+  const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
 
+    const questionMap = new Map();
     // 1. Initialize questions
     rawQuestions.forEach((item) => {
       if (item.QuestionKey && !questionMap.has(item.QuestionKey)) {
@@ -245,7 +260,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
               order: parseInt(answer.MatrixColumnOrder || "0"),
               // Note: We can't determine isExclusive here yet, as the flag
               // is incorrectly located in logicRules. We'll do it in a later step.
-              isExclusive: false, 
+              isExclusive: false,
             });
           }
         } else {
@@ -275,7 +290,9 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
           (col) => col.key === rule.MatrixColumnPair
         );
         if (targetColumn) {
-          console.log(`Found exclusive column from logic rule: ${targetColumn.text}`);
+          console.log(
+            `Found exclusive column from logic rule: ${targetColumn.text}`
+          );
           targetColumn.isExclusive = true;
           targetColumn.exclusiveType = rule.ExclusiveType || "row";
         }
@@ -324,6 +341,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
   };
 
   const handleRegExChange = (questionKey, value, regexString, errorMessage) => {
+
     handleAnswerChange(questionKey, value);
 
     if (!regexString) return;
@@ -340,11 +358,13 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         setErrors((prev) => ({ ...prev, [questionKey]: null }));
       }
     } catch (e) {
+
       console.error("Invalid RegEx pattern provided:", regexString);
       setErrors((prev) => ({
         ...prev,
         [questionKey]: "Invalid validation rule.",
       }));
+
     }
   };
 
@@ -368,7 +388,9 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
 
       if (matrixType === "multiple") {
         // --- MULTIPLE SELECTION LOGIC ---
-        const currentRow = Array.isArray(newMatrix[rowIndex]) ? newMatrix[rowIndex] : [];
+        const currentRow = Array.isArray(newMatrix[rowIndex])
+          ? newMatrix[rowIndex]
+          : [];
 
         if (isExclusiveColumn) {
           if (exclusiveType === "all") {
@@ -387,7 +409,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         } else {
           // Remove exclusive columns if present
           const filtered = currentRow.filter(
-            (idx) => !(question.MatrixColumns?.[idx]?.isExclusive)
+            (idx) => !question.MatrixColumns?.[idx]?.isExclusive
           );
           // Toggle selection
           if (filtered.includes(columnIndex)) {
@@ -423,6 +445,15 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
       }
 
       return { ...prev, [questionKey]: newMatrix };
+
+    });
+  };
+
+  const handleNumericalMatrixChange = (questionKey, rowIndex, newValue) => {
+    setAnswers((prev) => {
+      const prevMatrix = prev[questionKey] || {};
+      const newMatrix = { ...prevMatrix, [rowIndex]: newValue };
+      return { ...prev, [questionKey]: newMatrix };
     });
   };
 
@@ -434,6 +465,42 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         : [...currentAnswers, optionKey];
       return { ...prev, [questionKey]: updatedAnswers };
     });
+  };
+
+  const handleMCQChange = (questionKey, newValue, mcqOtherValue) => {
+    if (newValue === "other") {
+
+      // If switching to 'other', initialize with an empty text value
+      // or preserve the old one if it exists
+
+      const previousAnswer = answers[questionKey];
+      const previousText =
+        typeof previousAnswer === "object" &&
+        previousAnswer.selected === "other"
+          ? previousAnswer.value
+          : "";
+
+      setAnswers((prev) => ({
+        ...prev,
+        [questionKey]: { selected: "other", value: previousText },
+      }));
+
+    } else {
+
+      // For any other MCQ option, just save the key
+      setAnswers((prev) => ({ ...prev, [questionKey]: newValue }));
+
+    }
+  };
+
+  const handleMCQOtherTextChange = (questionKey, textValue) => {
+
+    // Update the text value for the 'other' option
+    setAnswers((prev) => ({
+      ...prev,
+      [questionKey]: { selected: "other", value: textValue },
+    }));
+
   };
 
   const groupedQuestions = useMemo(() => {
@@ -459,48 +526,60 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
   }, [questionData]);
 
   const visibilityRules = useMemo(() => {
-  const map = new Map();
-  const showHideRules = Array.isArray(logicRules) ? logicRules.filter((r) => r.Action === "SHOW_HIDE") : [];
-  showHideRules.forEach((rule) => {
-    const targetKey = rule.NextQuestion;
-    if (!map.has(targetKey)) {
-      map.set(targetKey, []);
-    }
-    map.get(targetKey).push({
-      sourceKey: rule.QuestionKey,
-      triggerAnswerKey: rule.AnswerKey,
-      matrixRowPair: rule.MatrixRowPair || "",
-      matrixColumnPair: rule.MatrixColumnPair || "",
-      shouldShow: rule.Visibility.toLowerCase() === "show",
+    const map = new Map();
+    const showHideRules = Array.isArray(logicRules)
+      ? logicRules.filter((r) => r.Action === "SHOW_HIDE")
+      : [];
+    showHideRules.forEach((rule) => {
+      const targetKey = rule.NextQuestion;
+      if (!map.has(targetKey)) {
+        map.set(targetKey, []);
+      }
+      map.get(targetKey).push({
+        sourceKey: rule.QuestionKey,
+        triggerAnswerKey: rule.AnswerKey,
+        matrixRowPair: rule.MatrixRowPair || "",
+        matrixColumnPair: rule.MatrixColumnPair || "",
+        shouldShow: rule.Visibility.toLowerCase() === "show",
+      });
     });
-  });
-  return map;
-}, [logicRules]);
+    return map;
+  }, [logicRules]);
 
   const isQuestionVisible = (question) => {
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
-    console.log(`Checking visibility for question ${question.QuestionKey}:`, { 
-      rules: rulesForThisQuestion, 
-      defaultVisible: question.defaultVisible 
+    console.log(`Checking visibility for question ${question.QuestionKey}:`, {
+      rules: rulesForThisQuestion,
+      defaultVisible: question.defaultVisible,
     });
-    
+
     if (!rulesForThisQuestion) {
       return question.defaultVisible;
     }
-    
+
     for (const rule of rulesForThisQuestion) {
-      const sourceQuestion = questionData.find(q => q.QuestionKey === rule.sourceKey);
+      const sourceQuestion = questionData.find(
+        (q) => q.QuestionKey === rule.sourceKey
+      );
       const userAnswer = answers[rule.sourceKey];
-      
-      console.log("Checking rule:", { rule, sourceQuestion: sourceQuestion?.QuestionType, userAnswer });
-      
+
+      console.log("Checking rule:", {
+        rule,
+        sourceQuestion: sourceQuestion?.QuestionType,
+        userAnswer,
+      });
+
       if (!userAnswer) continue;
-      
+
       let conditionMet = false;
-      
+
       if (sourceQuestion?.QuestionType === "Matrix") {
         // For Matrix questions with enhanced cell-specific logic
-        conditionMet = checkMatrixConditionEnhanced(userAnswer, rule, sourceQuestion);
+        conditionMet = checkMatrixConditionEnhanced(
+          userAnswer,
+          rule,
+          sourceQuestion
+        );
       } else {
         // Regular question logic
         if (Array.isArray(userAnswer)) {
@@ -509,9 +588,12 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
           conditionMet = userAnswer === rule.triggerAnswerKey;
         }
       }
-      
-      console.log("Condition result:", { conditionMet, shouldShow: rule.shouldShow });
-      
+
+      console.log("Condition result:", {
+        conditionMet,
+        shouldShow: rule.shouldShow,
+      });
+
       if (conditionMet && rule.shouldShow) {
         return true;
       }
@@ -521,15 +603,23 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
 
   // Enhanced helper function to check matrix conditions with cell-specific logic
   const checkMatrixConditionEnhanced = (matrixAnswer, rule, sourceQuestion) => {
-    console.log("Checking matrix condition:", { matrixAnswer, rule, sourceQuestion });
-    
+    console.log("Checking matrix condition:", {
+      matrixAnswer,
+      rule,
+      sourceQuestion,
+    });
+
     // Check if we have specific cell logic (MatrixRowPair + MatrixColumnPair)
     if (rule.matrixColumnPair) {
       // Cell-specific logic: must match exact row + column combination
       return checkSpecificCellLogic(matrixAnswer, rule, sourceQuestion);
     } else {
       // Row or Column-only logic (backward compatibility)
-      return checkRowOrColumnLogic(matrixAnswer, rule.triggerAnswerKey, sourceQuestion);
+      return checkRowOrColumnLogic(
+        matrixAnswer,
+        rule.triggerAnswerKey,
+        sourceQuestion
+      );
     }
   };
 
@@ -538,16 +628,20 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
   const checkSpecificCellLogic = (matrixAnswer, rule, sourceQuestion) => {
     const targetRowKey = rule.matrixRowPair; // <--- CORRECTED LINE
     const targetColumnKey = rule.matrixColumnPair;
-    
+
     console.log("=== CELL LOGIC CHECK ===");
     console.log("Target keys:", { targetRowKey, targetColumnKey });
     console.log("Matrix answer:", matrixAnswer);
     console.log("Question rows:", sourceQuestion.MatrixRows);
     console.log("Question columns:", sourceQuestion.MatrixColumns);
 
-    const targetRow = sourceQuestion.MatrixRows.find(row => row.key === targetRowKey);
-    const targetColumn = sourceQuestion.MatrixColumns.find(col => col.key === targetColumnKey);
-    
+    const targetRow = sourceQuestion.MatrixRows.find(
+      (row) => row.key === targetRowKey
+    );
+    const targetColumn = sourceQuestion.MatrixColumns.find(
+      (col) => col.key === targetColumnKey
+    );
+
     console.log("Found target row:", targetRow);
     console.log("Found target column:", targetColumn);
 
@@ -555,10 +649,10 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
       console.log("❌ Row or column not found");
       return false;
     }
-    
+
     const rowIndex = sourceQuestion.MatrixRows.indexOf(targetRow);
     const columnIndex = sourceQuestion.MatrixColumns.indexOf(targetColumn);
-    
+
     console.log("UI indexes:", { rowIndex, columnIndex });
 
     if (rowIndex === -1 || columnIndex === -1) {
@@ -580,7 +674,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     } else {
       isSelected = rowAnswer === columnIndex;
     }
-    
+
     console.log(`✅ Cell logic result: ${isSelected}`);
     console.log("=== END CELL LOGIC CHECK ===");
 
@@ -588,23 +682,33 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
   };
 
   // Check for row-only or column-only logic (backward compatibility)
-  const checkRowOrColumnLogic = (matrixAnswer, triggerAnswerKey, sourceQuestion) => {
+  const checkRowOrColumnLogic = (
+    matrixAnswer,
+    triggerAnswerKey,
+    sourceQuestion
+  ) => {
     for (const [rowIndex, columnSelection] of Object.entries(matrixAnswer)) {
       const row = sourceQuestion.MatrixRows[parseInt(rowIndex)];
       if (!row) continue;
-      
+
       if (Array.isArray(columnSelection)) {
         // Multiple selection matrix
         for (const colIndex of columnSelection) {
           const column = sourceQuestion.MatrixColumns[colIndex];
-          if (column && (row.key === triggerAnswerKey || column.key === triggerAnswerKey)) {
+          if (
+            column &&
+            (row.key === triggerAnswerKey || column.key === triggerAnswerKey)
+          ) {
             return true;
           }
         }
       } else {
         // Single selection matrix
         const column = sourceQuestion.MatrixColumns[columnSelection];
-        if (column && (row.key === triggerAnswerKey || column.key === triggerAnswerKey)) {
+        if (
+          column &&
+          (row.key === triggerAnswerKey || column.key === triggerAnswerKey)
+        ) {
           return true;
         }
       }
@@ -621,7 +725,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
   }, [groupedQuestions]);
 
   const [groupHistory, setGroupHistory] = useState([0]);
-  
+
   const handleBack = () => {
     setGroupHistory((prev) => {
       if (prev.length <= 1) return prev;
@@ -649,16 +753,20 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
     }
 
     let nextGroupIndex = currentGroupIndex + 1;
-    
+
     // Check for jump logic in current group questions
     for (const question of currentGroup.questions) {
       const userAnswer = answers[question.QuestionKey];
-      
+
       if (!userAnswer) continue;
-      
+
       if (question.QuestionType === "Matrix" && question.matrixJumpLogic) {
         // Handle Matrix jump logic
-        const jumpTarget = checkMatrixJumpLogic(userAnswer, question.matrixJumpLogic, question);
+        const jumpTarget = checkMatrixJumpLogic(
+          userAnswer,
+          question.matrixJumpLogic,
+          question
+        );
         if (jumpTarget) {
           const jumpToGroupIndex = questionGroupKeyToIndexMap.get(jumpTarget);
           if (jumpToGroupIndex !== undefined) {
@@ -673,7 +781,8 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         );
         if (selectedOption?.jumpToGroup) {
           const targetGroupKey = selectedOption.jumpToGroup;
-          const jumpToGroupIndex = questionGroupKeyToIndexMap.get(targetGroupKey);
+          const jumpToGroupIndex =
+            questionGroupKeyToIndexMap.get(targetGroupKey);
           if (jumpToGroupIndex !== undefined) {
             nextGroupIndex = jumpToGroupIndex;
             break;
@@ -681,7 +790,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         }
       }
     }
-    
+
     if (nextGroupIndex >= groupedQuestions.length) {
       handleSubmit();
     } else {
@@ -691,20 +800,28 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
   };
 
   // Enhanced helper function to check matrix jump logic with cell-specific logic
-  const checkMatrixJumpLogic = (matrixAnswer, jumpLogicRules, sourceQuestion) => {
+  const checkMatrixJumpLogic = (
+    matrixAnswer,
+    jumpLogicRules,
+    sourceQuestion
+  ) => {
     for (const rule of jumpLogicRules) {
       console.log("Checking jump rule:", rule);
-      
+
       // Check if we have specific cell logic (MatrixRowPair + MatrixColumnPair)
       if (rule.matrixColumnPair) {
         // Cell-specific jump logic
         const targetRowKey = rule.answerKey;
         const targetColumnKey = rule.matrixColumnPair;
-        
+
         // Find the row and column indexes
-        const rowIndex = sourceQuestion.MatrixRows.findIndex(row => row.key === targetRowKey);
-        const columnIndex = sourceQuestion.MatrixColumns.findIndex(col => col.key === targetColumnKey);
-        
+        const rowIndex = sourceQuestion.MatrixRows.findIndex(
+          (row) => row.key === targetRowKey
+        );
+        const columnIndex = sourceQuestion.MatrixColumns.findIndex(
+          (col) => col.key === targetColumnKey
+        );
+
         if (rowIndex !== -1 && columnIndex !== -1) {
           const rowAnswer = matrixAnswer[rowIndex];
           if (rowAnswer !== undefined) {
@@ -714,7 +831,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
             } else {
               cellSelected = rowAnswer === columnIndex;
             }
-            
+
             if (cellSelected) {
               console.log("Jump triggered by cell selection");
               return rule.jumpToGroup;
@@ -723,20 +840,28 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         }
       } else {
         // Row or Column-only jump logic (backward compatibility)
-        for (const [rowIndex, columnSelection] of Object.entries(matrixAnswer)) {
+        for (const [rowIndex, columnSelection] of Object.entries(
+          matrixAnswer
+        )) {
           const row = sourceQuestion.MatrixRows[parseInt(rowIndex)];
           if (!row) continue;
-          
+
           if (Array.isArray(columnSelection)) {
             for (const colIndex of columnSelection) {
               const column = sourceQuestion.MatrixColumns[colIndex];
-              if (column && (row.key === rule.answerKey || column.key === rule.answerKey)) {
+              if (
+                column &&
+                (row.key === rule.answerKey || column.key === rule.answerKey)
+              ) {
                 return rule.jumpToGroup;
               }
             }
           } else {
             const column = sourceQuestion.MatrixColumns[columnSelection];
-            if (column && (row.key === rule.answerKey || column.key === rule.answerKey)) {
+            if (
+              column &&
+              (row.key === rule.answerKey || column.key === rule.answerKey)
+            ) {
               return rule.jumpToGroup;
             }
           }
@@ -763,7 +888,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
             variant="h6"
             gutterBottom
             component="div"
-            dangerouslySetInnerHTML={{ __html: `${question.Question}` }} // ${index + 1}. 
+            dangerouslySetInnerHTML={{ __html: `${question.Question}` }} // ${index + 1}.
           />
           <Chip
             label={question.QuestionType}
@@ -816,24 +941,53 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
           />
         )}
 
-        {question.QuestionType === "MCQ" && (
-          <FormControl component="fieldset">
-            <FormLabel component="legend">Select one option:</FormLabel>
-            <RadioGroup
-              value={currentAnswer}
-              onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
-            >
-              {question.Options?.map((option) => (
-                <FormControlLabel
-                  key={option.key}
-                  value={option.key}
-                  control={<Radio />}
-                  label={option.text}
-                />
-              ))}
-            </RadioGroup>
-          </FormControl>
-        )}
+        {question.QuestionType === "MCQ" &&
+          (() => {
+            const isOtherSelected =
+              typeof currentAnswer === "object" &&
+              currentAnswer.selected === "other";
+            const radioGroupValue = isOtherSelected ? "other" : currentAnswer;
+
+            return (
+              <FormControl component="fieldset" sx={{ width: "100%" }}>
+                <FormLabel component="legend">Select one option:</FormLabel>
+                <RadioGroup
+                  value={radioGroupValue}
+                  onChange={(e) => handleMCQChange(questionKey, e.target.value)}
+                >
+                  {question.Options?.map((option) => (
+                    <FormControlLabel
+                      key={option.key}
+                      value={option.key}
+                      control={<Radio />}
+                      label={option.text}
+                    />
+                  ))}
+                  {question.MCQOther === "1" && (
+                    <FormControlLabel
+                      key="other"
+                      value="other"
+                      control={<Radio />}
+                      label="Other"
+                    />
+                  )}
+                </RadioGroup>
+                {question.MCQOther === "1" && isOtherSelected && (
+                  <TextField
+                    fullWidth
+                    placeholder="Please specify"
+                    variant="outlined"
+                    size="small"
+                    value={isOtherSelected ? currentAnswer.value : ""}
+                    onChange={(e) =>
+                      handleMCQOtherTextChange(questionKey, e.target.value)
+                    }
+                    sx={{ mt: 1, ml: 4 }} // Indent to align with radio options
+                  />
+                )}
+              </FormControl>
+            );
+          })()}
 
         {question.QuestionType === "MultiSelect" && (
           <FormControl component="fieldset">
@@ -858,85 +1012,211 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
         {question.QuestionType === "Matrix" && (
           <Box>
             <Typography variant="body2" gutterBottom color="text.secondary">
-              {question.MatrixType === "multiple" 
-                ? "Select all that apply for each row:" 
-                : "Select one option for each row:"
-              }
+              {question.MatrixType === "multiple"
+                ? "Select all that apply for each row:"
+                : question.MatrixType === "numerical"
+                ? "Move the slider to indicate the level for each item:"
+                : "Select one option for each row:"}
             </Typography>
-            {question.MatrixRows?.length > 0 && question.MatrixColumns?.length > 0 ? (
-              <TableContainer component={Paper} variant="outlined" sx={{ mt: 2 }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: "bold", bgcolor: "grey.50" }} />
-                      {question.MatrixColumns.map((col) => (
-                        <TableCell 
-                          key={col.key} 
-                          align="center" 
-                          sx={{ 
-                            fontWeight: "bold", 
-                            bgcolor: col.isExclusive ? "orange.50" : "grey.50",
-                            borderLeft: col.isExclusive ? "3px solid orange" : "none"
-                          }}
-                        >
-                          {col.text}
-                          {col.isExclusive && (
-                            <Typography variant="caption" display="block" color="orange.main">
-                              (Exclusive)
-                            </Typography>
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {question.MatrixRows.map((row, rIdx) => (
-                      <TableRow key={row.key} hover>
-                        <TableCell sx={{ fontWeight: "medium" }}>{row.text}</TableCell>
-                        {question.MatrixColumns.map((col, cIdx) => (
-                          <TableCell 
-                            key={col.key} 
-                            align="center"
-                            sx={{ 
-                              bgcolor: col.isExclusive ? "orange.25" : "inherit"
-                            }}
-                          >
-                            {question.MatrixType === "multiple" ? (
-                              <Checkbox
-                                checked={(((answers[questionKey] || {})[rIdx] || [])).includes(cIdx)}
-                                onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "multiple")}
-                                sx={{
-                                  color: col.isExclusive ? "orange.main" : "inherit",
-                                  '&.Mui-checked': {
-                                    color: col.isExclusive ? "orange.main" : "primary.main"
-                                  }
-                                }}
-                              />
-                            ) : (
-                              <Radio
-                                checked={(answers[questionKey] || {})[rIdx] === cIdx}
-                                onChange={() => handleMatrixChange(questionKey, rIdx, cIdx, "single")}
-                                name={`matrix-${questionKey}-row-${rIdx}`}
-                                sx={{
-                                  color: col.isExclusive ? "orange.main" : "inherit",
-                                  '&.Mui-checked': {
-                                    color: col.isExclusive ? "orange.main" : "primary.main"
-                                  }
-                                }}
-                              />
-                            )}
+            {question.MatrixRows?.length > 0 &&
+            (question.MatrixColumns?.length > 0 ||
+              question.MatrixType === "numerical") ? (
+              <>
+                {question.MatrixType === "numerical" ? (
+                  // --- NEW: Numerical (Slider) Matrix Rendering ---
+                  <TableContainer
+                    component={Paper}
+                    variant="outlined"
+                    sx={{ mt: 2 }}
+                  >
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell
+                            sx={{ width: "30%", borderBottom: "none" }}
+                          />
+                          <TableCell sx={{ borderBottom: "none", px: 2 }}>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                              }}
+                            >
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {question.MinRangeText || question.MinRange}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {question.MaxRangeText || question.MaxRange}
+                              </Typography>
+                            </Box>
                           </TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {question.MatrixRows.map((row, rIdx) => {
+                          const min = Number(question.MinRange ?? 0);
+                          const max = Number(question.MaxRange ?? 100);
+                          const currentValue =
+                            (answers[questionKey] || {})[rIdx] ?? min;
+
+                          return (
+                            <TableRow key={row.key} hover>
+                              <TableCell
+                                sx={{ fontWeight: "medium", width: "30%" }}
+                              >
+                                {row.text}
+                              </TableCell>
+                              <TableCell sx={{ px: 2 }}>
+                                <Slider
+                                  value={currentValue}
+                                  min={min}
+                                  max={max}
+                                  step={1}
+                                  onChangeCommitted={(e, val) =>
+                                    handleNumericalMatrixChange(
+                                      questionKey,
+                                      rIdx,
+                                      val
+                                    )
+                                  }
+                                  valueLabelDisplay="auto"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  // --- EXISTING: Radio/Checkbox Matrix Rendering ---
+                  <TableContainer
+                    component={Paper}
+                    variant="outlined"
+                    sx={{ mt: 2 }}
+                  >
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell
+                            sx={{ fontWeight: "bold", bgcolor: "grey.50" }}
+                          />
+                          {question.MatrixColumns.map((col) => (
+                            <TableCell
+                              key={col.key}
+                              align="center"
+                              sx={{
+                                fontWeight: "bold",
+                                bgcolor: col.isExclusive
+                                  ? "orange.50"
+                                  : "grey.50",
+                                borderLeft: col.isExclusive
+                                  ? "3px solid orange"
+                                  : "none",
+                              }}
+                            >
+                              {col.text}
+                              {col.isExclusive && (
+                                <Typography
+                                  variant="caption"
+                                  display="block"
+                                  color="orange.main"
+                                >
+                                  (Exclusive)
+                                </Typography>
+                              )}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {question.MatrixRows.map((row, rIdx) => (
+                          <TableRow key={row.key} hover>
+                            <TableCell sx={{ fontWeight: "medium" }}>
+                              {row.text}
+                            </TableCell>
+                            {question.MatrixColumns.map((col, cIdx) => (
+                              <TableCell
+                                key={col.key}
+                                align="center"
+                                sx={{
+                                  bgcolor: col.isExclusive
+                                    ? "orange.25"
+                                    : "inherit",
+                                }}
+                              >
+                                {question.MatrixType === "multiple" ? (
+                                  <Checkbox
+                                    checked={(
+                                      (answers[questionKey] || {})[rIdx] || []
+                                    ).includes(cIdx)}
+                                    onChange={() =>
+                                      handleMatrixChange(
+                                        questionKey,
+                                        rIdx,
+                                        cIdx,
+                                        "multiple"
+                                      )
+                                    }
+                                    sx={{
+                                      color: col.isExclusive
+                                        ? "orange.main"
+                                        : "inherit",
+                                      "&.Mui-checked": {
+                                        color: col.isExclusive
+                                          ? "orange.main"
+                                          : "primary.main",
+                                      },
+                                    }}
+                                  />
+                                ) : (
+                                  <Radio
+                                    checked={
+                                      (answers[questionKey] || {})[rIdx] ===
+                                      cIdx
+                                    }
+                                    onChange={() =>
+                                      handleMatrixChange(
+                                        questionKey,
+                                        rIdx,
+                                        cIdx,
+                                        "single"
+                                      )
+                                    }
+                                    name={`matrix-${questionKey}-row-${rIdx}`}
+                                    sx={{
+                                      color: col.isExclusive
+                                        ? "orange.main"
+                                        : "inherit",
+                                      "&.Mui-checked": {
+                                        color: col.isExclusive
+                                          ? "orange.main"
+                                          : "primary.main",
+                                      },
+                                    }}
+                                  />
+                                )}
+                              </TableCell>
+                            ))}
+                          </TableRow>
                         ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </>
             ) : (
               <Typography color="warning.main" variant="body2">
-                Matrix question is missing rows or columns. Please check your data.
-                <br />
-                Debug: Rows: {question.MatrixRows?.length || 0}, Columns: {question.MatrixColumns?.length || 0}
+                Matrix question is missing rows or columns. Please check your
+                data. <br />
+                Debug: Rows: {question.MatrixRows?.length || 0}, Columns:
+                {question.MatrixColumns?.length || 0}
               </Typography>
             )}
           </Box>
@@ -1108,10 +1388,7 @@ const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
           <Button onClick={handleDialogClose}>Cancel</Button>
           {!loading && groupedQuestions.length > 0 && (
             <>
-              <Button
-                onClick={handleBack}
-                disabled={groupHistory.length <= 1}
-              >
+              <Button onClick={handleBack} disabled={groupHistory.length <= 1}>
                 Back
               </Button>
               <Button variant="contained" onClick={handleNext}>
