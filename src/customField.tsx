@@ -33,136 +33,21 @@ import {
   TableHead,
   TableRow,
 } from "@mui/material";
+import {
+  ProcessedQuestion,
+  QuestionGroup
+} from "./common/types";
+import { SliderQuestion } from "./components/SliderQuestion";
+import TextQuestion from "./components/TextQuestion";
+import RegExQuestion from "./components/RegExQuestion";
+import McqQuestion from "./components/McqQuestion";
+import MultiSelectQuestion from "./components/MultiSelectQuestion";
+import MatrixQuestion from "./components/MatrixQuestion";
+import YesNoQuestion from "./components/YesNoQuestion";
+import DropdownQuestion from "./components/DropdownQuestion";
+import ImageCompareQuestion from "./components/ImageCompareQuestion";
 
 FiveInitialize();
-
-// --- INTERFACES ---
-interface ProcessedQuestion {
-  GroupName: string;
-  GroupOrder: string;
-  Question: string;
-  QuestionGroupKey: string;
-  QuestionKey: string;
-  QuestionOrder: string;
-  QuestionType: string;
-  QuestionaireKey: string;
-  QuestionaireName: string;
-  MinRange?: number;
-  MaxRange?: number;
-  MinRangeText?: string;
-  MaxRangeText?: string;
-  MatrixRows?: { key: string; text: string; order: number }[];
-  MatrixColumns?: {
-    key: string;
-    text: string;
-    order: number;
-    isExclusive?: boolean;
-  }[];
-  MatrixType?: "single" | "multiple" | "numerical"; //added extra matrix type as per Milads request
-  matrixJumpLogic?: {
-    answerKey: string;
-    matrixRowPair: string;
-    matrixColumnPair: string;
-    jumpToGroup: string;
-    conditions: string;
-  }[];
-  defaultVisible: boolean;
-  RegEx?: string;
-  RegExMessage?: string;
-  Options?: {
-    key: string;
-    text: string;
-    order: number;
-    jumpToGroup?: string;
-  }[];
-}
-
-interface QuestionGroup {
-  groupName: string;
-  groupOrder: number;
-  questionGroupKey: string;
-  questions: ProcessedQuestion[];
-}
-
-// --- DEDICATED SLIDER COMPONENT ---
-const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
-  const min = Number(question.MinRange ?? 1);
-  const max = Number(question.MaxRange ?? 10);
-  const defaultValue = min;
-  const [sliderValue, setSliderValue] = useState(
-    typeof initialValue === "number" ? initialValue : defaultValue
-  );
-
-  useEffect(() => {
-    const newInitialValue =
-      typeof initialValue === "number" ? initialValue : defaultValue;
-    setSliderValue(newInitialValue);
-  }, [initialValue, defaultValue]);
-
-  const handleSliderChange = (event, newValue) => {
-    setSliderValue(newValue);
-  };
-
-  const handleSliderCommit = (event, finalValue) => {
-    onCommitAnswer(finalValue);
-  };
-
-  return (
-    <Box sx={{ px: 2 }}>
-      <Typography variant="body2" gutterBottom>
-        Rate from {min} to {max}
-      </Typography>
-      <Slider
-        orientation="horizontal"
-        sx={{
-          "& .MuiSlider-markLabel": {
-            display: "inline-block !important",
-            width: "120px !important",
-            whiteSpace: "normal !important",
-            wordBreak: "break-word !important",
-            fontSize: "0.85em",
-            lineHeight: 1.2,
-            overflowWrap: "break-word",
-            textAlign: "center",
-          },
-          "& .MuiSlider-markLabel[data-index='0']": {
-            textAlign: "center",
-          },
-          "& .MuiSlider-markLabel[data-index='1']": {
-            transform: "translateX(-100%)", // right-align last label
-            textAlign: "right",
-          },
-        }}
-        value={sliderValue}
-        onChange={handleSliderChange}
-        onChangeCommitted={handleSliderCommit}
-        step={1}
-        min={min}
-        max={max}
-        valueLabelDisplay="auto"
-        marks={[
-          {
-            value: min,
-            label: question.MinRangeText
-              ? `${min} – ${question.MinRangeText}`
-              : min.toString(),
-          },
-          {
-            value: max,
-            label: question.MaxRangeText
-              ? `${max} – ${question.MaxRangeText}`
-              : max.toString(),
-          },
-        ]}
-      />
-      <Box sx={{ textAlign: "center", mt: 1 }}>
-        <Typography variant="body2" color="primary">
-          Current value: {sliderValue}
-        </Typography>
-      </Box>
-    </Box>
-  );
-};
 
 // --- MAIN SURVEY COMPONENT ---
 const CustomField = (props: CustomFieldProps) => {
@@ -175,6 +60,7 @@ const CustomField = (props: CustomFieldProps) => {
   const [answers, setAnswers] = useState({});
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
   const [errors, setErrors] = useState({});
+  const TextQuestionTypes = ["Text", "LongText", "Number", "Email", "Date"];
 
   const handleDialogOpen = async () => {
     setDialogOpen(true);
@@ -198,8 +84,6 @@ const CustomField = (props: CustomFieldProps) => {
       null,
       (result) => {
         const data = JSON.parse(result.serverResponse.results);
-        console.log("Logging Data", data);
-
         const rawQuestions = Array.isArray(data.questions.records)
           ? data.questions.records
           : [];
@@ -217,7 +101,6 @@ const CustomField = (props: CustomFieldProps) => {
           allLogicRules
         );
         setQuestionData(processed);
-
         if (processed.length > 0) {
           setSurveyTitle(processed[0].QuestionaireName);
         }
@@ -227,7 +110,6 @@ const CustomField = (props: CustomFieldProps) => {
   };
 
   const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
-
     const questionMap = new Map();
     // 1. Initialize questions
     rawQuestions.forEach((item) => {
@@ -267,6 +149,7 @@ const CustomField = (props: CustomFieldProps) => {
           question.Options.push({
             key: answer.AnswerKey,
             text: answer.Answer,
+            isExclusive: answer.IsExclusive,
             order: parseInt(answer.AnswerOrder || "0"),
           });
         }
@@ -290,9 +173,6 @@ const CustomField = (props: CustomFieldProps) => {
           (col) => col.key === rule.MatrixColumnPair
         );
         if (targetColumn) {
-          console.log(
-            `Found exclusive column from logic rule: ${targetColumn.text}`
-          );
           targetColumn.isExclusive = true;
           targetColumn.exclusiveType = rule.ExclusiveType || "row";
         }
@@ -304,6 +184,7 @@ const CustomField = (props: CustomFieldProps) => {
           if (!sourceQuestion.matrixJumpLogic) {
             sourceQuestion.matrixJumpLogic = [];
           }
+
           sourceQuestion.matrixJumpLogic.push({
             answerKey: rule.AnswerKey,
             matrixRowPair: rule.MatrixRowPair || "",
@@ -341,15 +222,11 @@ const CustomField = (props: CustomFieldProps) => {
   };
 
   const handleRegExChange = (questionKey, value, regexString, errorMessage) => {
-
     handleAnswerChange(questionKey, value);
-
     if (!regexString) return;
 
     try {
-      const pattern = regexString.startsWith("/")
-        ? regexString.slice(1, -1)
-        : regexString;
+      const pattern = regexString.startsWith("/") ? regexString.slice(1, -1) : regexString;
       const regex = new RegExp(pattern);
 
       if (!regex.test(value) && value !== "") {
@@ -358,8 +235,6 @@ const CustomField = (props: CustomFieldProps) => {
         setErrors((prev) => ({ ...prev, [questionKey]: null }));
       }
     } catch (e) {
-
-      console.error("Invalid RegEx pattern provided:", regexString);
       setErrors((prev) => ({
         ...prev,
         [questionKey]: "Invalid validation rule.",
@@ -457,15 +332,26 @@ const CustomField = (props: CustomFieldProps) => {
     });
   };
 
-  const handleCheckboxChange = (questionKey, optionKey) => {
+  const handleCheckboxChange = (questionKey, optionKey, isExclusive, options) => {
     setAnswers((prev) => {
-      const currentAnswers = prev[questionKey] || [];
-      const updatedAnswers = currentAnswers.includes(optionKey)
-        ? currentAnswers.filter((item) => item !== optionKey)
-        : [...currentAnswers, optionKey];
-      return { ...prev, [questionKey]: updatedAnswers };
+        const currentAnswers = prev[questionKey] || [];
+        
+        if (isExclusive) {
+            return { ...prev, [questionKey]: [optionKey] };
+        } else {
+            const filteredAnswers = currentAnswers.filter(key => {
+                const option = options.find(opt => opt.key === key);
+                return !option || option.isExclusive !== "1";
+            });
+            
+            const updatedAnswers = filteredAnswers.includes(optionKey)
+                ? filteredAnswers.filter((item) => item !== optionKey)
+                : [...filteredAnswers, optionKey];
+                
+            return { ...prev, [questionKey]: updatedAnswers };
+        }
     });
-  };
+};
 
   const handleMCQChange = (questionKey, newValue, mcqOtherValue) => {
     if (newValue === "other") {
@@ -476,7 +362,7 @@ const CustomField = (props: CustomFieldProps) => {
       const previousAnswer = answers[questionKey];
       const previousText =
         typeof previousAnswer === "object" &&
-        previousAnswer.selected === "other"
+          previousAnswer.selected === "other"
           ? previousAnswer.value
           : "";
 
@@ -486,15 +372,12 @@ const CustomField = (props: CustomFieldProps) => {
       }));
 
     } else {
-
       // For any other MCQ option, just save the key
       setAnswers((prev) => ({ ...prev, [questionKey]: newValue }));
-
     }
   };
 
   const handleMCQOtherTextChange = (questionKey, textValue) => {
-
     // Update the text value for the 'other' option
     setAnswers((prev) => ({
       ...prev,
@@ -517,6 +400,7 @@ const CustomField = (props: CustomFieldProps) => {
       }
       groups[question.QuestionGroupKey].questions.push(question);
     });
+
     Object.values(groups).forEach((group) => {
       group.questions.sort(
         (a, b) => parseInt(a.QuestionOrder) - parseInt(b.QuestionOrder)
@@ -527,14 +411,14 @@ const CustomField = (props: CustomFieldProps) => {
 
   const visibilityRules = useMemo(() => {
     const map = new Map();
-    const showHideRules = Array.isArray(logicRules)
-      ? logicRules.filter((r) => r.Action === "SHOW_HIDE")
-      : [];
+    const showHideRules = Array.isArray(logicRules) ? logicRules.filter((r) => r.Action === "SHOW_HIDE") : [];
+    
     showHideRules.forEach((rule) => {
       const targetKey = rule.NextQuestion;
       if (!map.has(targetKey)) {
         map.set(targetKey, []);
       }
+
       map.get(targetKey).push({
         sourceKey: rule.QuestionKey,
         triggerAnswerKey: rule.AnswerKey,
@@ -546,13 +430,9 @@ const CustomField = (props: CustomFieldProps) => {
     return map;
   }, [logicRules]);
 
-  const isQuestionVisible = (question) => {
+  const isQuestionVisible = (question): boolean => {
+    console.log("=== IS Q VISIBILE CALLED ===");
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
-    console.log(`Checking visibility for question ${question.QuestionKey}:`, {
-      rules: rulesForThisQuestion,
-      defaultVisible: question.defaultVisible,
-    });
-
     if (!rulesForThisQuestion) {
       return question.defaultVisible;
     }
@@ -561,17 +441,19 @@ const CustomField = (props: CustomFieldProps) => {
       const sourceQuestion = questionData.find(
         (q) => q.QuestionKey === rule.sourceKey
       );
+
       const userAnswer = answers[rule.sourceKey];
-
-      console.log("Checking rule:", {
-        rule,
-        sourceQuestion: sourceQuestion?.QuestionType,
-        userAnswer,
-      });
-
       if (!userAnswer) continue;
+      // if (!userAnswer) {
+      //   return Boolean(question.defaultVisible);
+      // }
 
       let conditionMet = false;
+
+      if (question.Question === "<div>ShowTest</div>") {
+        console.log("==== source question ===");
+        console.log(sourceQuestion);
+      }
 
       if (sourceQuestion?.QuestionType === "Matrix") {
         // For Matrix questions with enhanced cell-specific logic
@@ -587,30 +469,36 @@ const CustomField = (props: CustomFieldProps) => {
         } else {
           conditionMet = userAnswer === rule.triggerAnswerKey;
         }
-      }
+      } 
 
-      console.log("Condition result:", {
-        conditionMet,
-        shouldShow: rule.shouldShow,
-      });
+      if (conditionMet) {
+        if (rule.shouldShow) {
+          return true;
+        } 
 
-      if (conditionMet && rule.shouldShow) {
-        return true;
+        if (!rule.shouldShow) {
+          return false;
+        }
       }
     }
+
+    // if (question.Question === "<div>ShowTest</div>") {
+    //   console.log("==== Visibility ===");
+    //   console.log(question);
+    //   console.log(question.Visibility);
+    // }
+    
+    if (question.Visibility === "1") {
+      return true;
+    }
+
     return false;
   };
 
   // Enhanced helper function to check matrix conditions with cell-specific logic
   const checkMatrixConditionEnhanced = (matrixAnswer, rule, sourceQuestion) => {
-    console.log("Checking matrix condition:", {
-      matrixAnswer,
-      rule,
-      sourceQuestion,
-    });
-
     // Check if we have specific cell logic (MatrixRowPair + MatrixColumnPair)
-    if (rule.matrixColumnPair) {
+    if (rule.matrixColumnPair || rule.matrixRowPair) {
       // Cell-specific logic: must match exact row + column combination
       return checkSpecificCellLogic(matrixAnswer, rule, sourceQuestion);
     } else {
@@ -626,14 +514,14 @@ const CustomField = (props: CustomFieldProps) => {
   // Check for specific cell intersection logic
   // New, corrected function
   const checkSpecificCellLogic = (matrixAnswer, rule, sourceQuestion) => {
-    const targetRowKey = rule.matrixRowPair; // <--- CORRECTED LINE
-    const targetColumnKey = rule.matrixColumnPair;
+    let targetRowKey = rule.matrixRowPair; // <--- CORRECTED LINE
+    let targetColumnKey = rule.matrixColumnPair;
 
-    console.log("=== CELL LOGIC CHECK ===");
-    console.log("Target keys:", { targetRowKey, targetColumnKey });
-    console.log("Matrix answer:", matrixAnswer);
-    console.log("Question rows:", sourceQuestion.MatrixRows);
-    console.log("Question columns:", sourceQuestion.MatrixColumns);
+    if (!targetRowKey) {
+      targetRowKey = rule.triggerAnswerKey;
+    } else if (!targetColumnKey) {
+      targetColumnKey = rule.triggerAnswerKey;
+    }
 
     const targetRow = sourceQuestion.MatrixRows.find(
       (row) => row.key === targetRowKey
@@ -642,29 +530,19 @@ const CustomField = (props: CustomFieldProps) => {
       (col) => col.key === targetColumnKey
     );
 
-    console.log("Found target row:", targetRow);
-    console.log("Found target column:", targetColumn);
-
     if (!targetRow || !targetColumn) {
-      console.log("❌ Row or column not found");
       return false;
     }
 
     const rowIndex = sourceQuestion.MatrixRows.indexOf(targetRow);
     const columnIndex = sourceQuestion.MatrixColumns.indexOf(targetColumn);
-
-    console.log("UI indexes:", { rowIndex, columnIndex });
-
     if (rowIndex === -1 || columnIndex === -1) {
-      console.log("❌ Row or column index not found");
       return false;
     }
 
     const rowAnswer = matrixAnswer[rowIndex];
-    console.log(`Row ${rowIndex} answer:`, rowAnswer);
 
     if (rowAnswer === undefined || rowAnswer === null) {
-      console.log("❌ No answer for this row");
       return false;
     }
 
@@ -674,9 +552,6 @@ const CustomField = (props: CustomFieldProps) => {
     } else {
       isSelected = rowAnswer === columnIndex;
     }
-
-    console.log(`✅ Cell logic result: ${isSelected}`);
-    console.log("=== END CELL LOGIC CHECK ===");
 
     return isSelected;
   };
@@ -737,15 +612,16 @@ const CustomField = (props: CustomFieldProps) => {
 
   const handleNext = () => {
     const currentGroup = groupedQuestions[currentGroupIndex];
-    const visibleQuestions = currentGroup.questions.filter((q) =>
-      isQuestionVisible(q)
-    );
+    const visibleQuestions = currentGroup.questions.filter((q) => {
+      const result = isQuestionVisible(q);
+      return typeof result === 'boolean' ? result : result?.value;
+    });
+
 
     for (const question of visibleQuestions) {
       if (errors[question.QuestionKey]) {
         alert(
-          `Please fix the errors before proceeding: ${
-            errors[question.QuestionKey]
+          `Please fix the errors before proceeding: ${errors[question.QuestionKey]
           }`
         );
         return;
@@ -767,6 +643,7 @@ const CustomField = (props: CustomFieldProps) => {
           question.matrixJumpLogic,
           question
         );
+        
         if (jumpTarget) {
           const jumpToGroupIndex = questionGroupKeyToIndexMap.get(jumpTarget);
           if (jumpToGroupIndex !== undefined) {
@@ -806,8 +683,6 @@ const CustomField = (props: CustomFieldProps) => {
     sourceQuestion
   ) => {
     for (const rule of jumpLogicRules) {
-      console.log("Checking jump rule:", rule);
-
       // Check if we have specific cell logic (MatrixRowPair + MatrixColumnPair)
       if (rule.matrixColumnPair) {
         // Cell-specific jump logic
@@ -833,7 +708,6 @@ const CustomField = (props: CustomFieldProps) => {
             }
 
             if (cellSelected) {
-              console.log("Jump triggered by cell selection");
               return rule.jumpToGroup;
             }
           }
@@ -872,7 +746,6 @@ const CustomField = (props: CustomFieldProps) => {
   };
 
   const handleSubmit = () => {
-    console.log("Survey Answers:", answers);
     alert("Survey submitted! Check console for answers.");
     handleDialogClose();
   };
@@ -898,328 +771,52 @@ const CustomField = (props: CustomFieldProps) => {
           />
         </Box>
 
-        {question.QuestionType === "Text" && (
-          <TextField
-            fullWidth
-            placeholder="Enter your answer..."
-            variant="outlined"
-            size="small"
-            value={currentAnswer}
-            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
-          />
-        )}
-
-        {question.QuestionType === "LongText" && (
-          <TextField
-            fullWidth
-            multiline
-            rows={3}
-            placeholder="Enter your detailed answer..."
-            variant="outlined"
-            value={currentAnswer}
-            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
+        {TextQuestionTypes.includes(question.QuestionType) && (
+          <TextQuestion
+            currentAnswer={currentAnswer}
+            questionKey={questionKey}
+            handleAnswerChange={handleAnswerChange}
+            textType={question.QuestionType}
           />
         )}
 
         {question.QuestionType === "RegEx" && (
-          <TextField
-            fullWidth
-            placeholder="Enter your answer..."
-            variant="outlined"
-            size="small"
-            value={currentAnswer}
-            onChange={(e) =>
-              handleRegExChange(
-                questionKey,
-                e.target.value,
-                question.RegEx,
-                question.RegExMessage
-              )
-            }
-            error={!!errors[questionKey]}
-            helperText={errors[questionKey] || ""}
+          <RegExQuestion
+            currentAnswer={currentAnswer}
+            handleRegExChange={handleRegExChange}
+            questionKey={questionKey}
+            question={question}
+            errors={errors}
           />
         )}
 
         {question.QuestionType === "MCQ" &&
-          (() => {
-            const isOtherSelected =
-              typeof currentAnswer === "object" &&
-              currentAnswer.selected === "other";
-            const radioGroupValue = isOtherSelected ? "other" : currentAnswer;
-
-            return (
-              <FormControl component="fieldset" sx={{ width: "100%" }}>
-                <FormLabel component="legend">Select one option:</FormLabel>
-                <RadioGroup
-                  value={radioGroupValue}
-                  onChange={(e) => handleMCQChange(questionKey, e.target.value)}
-                >
-                  {question.Options?.map((option) => (
-                    <FormControlLabel
-                      key={option.key}
-                      value={option.key}
-                      control={<Radio />}
-                      label={option.text}
-                    />
-                  ))}
-                  {question.MCQOther === "1" && (
-                    <FormControlLabel
-                      key="other"
-                      value="other"
-                      control={<Radio />}
-                      label="Other"
-                    />
-                  )}
-                </RadioGroup>
-                {question.MCQOther === "1" && isOtherSelected && (
-                  <TextField
-                    fullWidth
-                    placeholder="Please specify"
-                    variant="outlined"
-                    size="small"
-                    value={isOtherSelected ? currentAnswer.value : ""}
-                    onChange={(e) =>
-                      handleMCQOtherTextChange(questionKey, e.target.value)
-                    }
-                    sx={{ mt: 1, ml: 4 }} // Indent to align with radio options
-                  />
-                )}
-              </FormControl>
-            );
-          })()}
+          <McqQuestion 
+            currentAnswer={currentAnswer}
+            handleMCQChange={handleMCQChange}
+            question={question}
+            questionKey={questionKey}
+            handleMCQOtherTextChange={handleMCQOtherTextChange}
+          />
+        }
 
         {question.QuestionType === "MultiSelect" && (
-          <FormControl component="fieldset">
-            <FormLabel component="legend">Select all that apply:</FormLabel>
-            {question.Options?.map((option) => (
-              <FormControlLabel
-                key={option.key}
-                control={
-                  <Checkbox
-                    checked={(currentAnswer || []).includes(option.key)}
-                    onChange={() =>
-                      handleCheckboxChange(questionKey, option.key)
-                    }
-                  />
-                }
-                label={option.text}
-              />
-            ))}
-          </FormControl>
+          <MultiSelectQuestion 
+            question={question}
+            currentAnswer={currentAnswer}
+            questionKey={questionKey}
+            handleCheckboxChange={handleCheckboxChange}
+          />
         )}
 
         {question.QuestionType === "Matrix" && (
-          <Box>
-            <Typography variant="body2" gutterBottom color="text.secondary">
-              {question.MatrixType === "multiple"
-                ? "Select all that apply for each row:"
-                : question.MatrixType === "numerical"
-                ? "Move the slider to indicate the level for each item:"
-                : "Select one option for each row:"}
-            </Typography>
-            {question.MatrixRows?.length > 0 &&
-            (question.MatrixColumns?.length > 0 ||
-              question.MatrixType === "numerical") ? (
-              <>
-                {question.MatrixType === "numerical" ? (
-                  // --- NEW: Numerical (Slider) Matrix Rendering ---
-                  <TableContainer
-                    component={Paper}
-                    variant="outlined"
-                    sx={{ mt: 2 }}
-                  >
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell
-                            sx={{ width: "30%", borderBottom: "none" }}
-                          />
-                          <TableCell sx={{ borderBottom: "none", px: 2 }}>
-                            <Box
-                              sx={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                              }}
-                            >
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {question.MinRangeText || question.MinRange}
-                              </Typography>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {question.MaxRangeText || question.MaxRange}
-                              </Typography>
-                            </Box>
-                          </TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {question.MatrixRows.map((row, rIdx) => {
-                          const min = Number(question.MinRange ?? 0);
-                          const max = Number(question.MaxRange ?? 100);
-                          const currentValue =
-                            (answers[questionKey] || {})[rIdx] ?? min;
-
-                          return (
-                            <TableRow key={row.key} hover>
-                              <TableCell
-                                sx={{ fontWeight: "medium", width: "30%" }}
-                              >
-                                {row.text}
-                              </TableCell>
-                              <TableCell sx={{ px: 2 }}>
-                                <Slider
-                                  value={currentValue}
-                                  min={min}
-                                  max={max}
-                                  step={1}
-                                  onChangeCommitted={(e, val) =>
-                                    handleNumericalMatrixChange(
-                                      questionKey,
-                                      rIdx,
-                                      val
-                                    )
-                                  }
-                                  valueLabelDisplay="auto"
-                                />
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                ) : (
-                  // --- EXISTING: Radio/Checkbox Matrix Rendering ---
-                  <TableContainer
-                    component={Paper}
-                    variant="outlined"
-                    sx={{ mt: 2 }}
-                  >
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell
-                            sx={{ fontWeight: "bold", bgcolor: "grey.50" }}
-                          />
-                          {question.MatrixColumns.map((col) => (
-                            <TableCell
-                              key={col.key}
-                              align="center"
-                              sx={{
-                                fontWeight: "bold",
-                                bgcolor: col.isExclusive
-                                  ? "orange.50"
-                                  : "grey.50",
-                                borderLeft: col.isExclusive
-                                  ? "3px solid orange"
-                                  : "none",
-                              }}
-                            >
-                              {col.text}
-                              {col.isExclusive && (
-                                <Typography
-                                  variant="caption"
-                                  display="block"
-                                  color="orange.main"
-                                >
-                                  (Exclusive)
-                                </Typography>
-                              )}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {question.MatrixRows.map((row, rIdx) => (
-                          <TableRow key={row.key} hover>
-                            <TableCell sx={{ fontWeight: "medium" }}>
-                              {row.text}
-                            </TableCell>
-                            {question.MatrixColumns.map((col, cIdx) => (
-                              <TableCell
-                                key={col.key}
-                                align="center"
-                                sx={{
-                                  bgcolor: col.isExclusive
-                                    ? "orange.25"
-                                    : "inherit",
-                                }}
-                              >
-                                {question.MatrixType === "multiple" ? (
-                                  <Checkbox
-                                    checked={(
-                                      (answers[questionKey] || {})[rIdx] || []
-                                    ).includes(cIdx)}
-                                    onChange={() =>
-                                      handleMatrixChange(
-                                        questionKey,
-                                        rIdx,
-                                        cIdx,
-                                        "multiple"
-                                      )
-                                    }
-                                    sx={{
-                                      color: col.isExclusive
-                                        ? "orange.main"
-                                        : "inherit",
-                                      "&.Mui-checked": {
-                                        color: col.isExclusive
-                                          ? "orange.main"
-                                          : "primary.main",
-                                      },
-                                    }}
-                                  />
-                                ) : (
-                                  <Radio
-                                    checked={
-                                      (answers[questionKey] || {})[rIdx] ===
-                                      cIdx
-                                    }
-                                    onChange={() =>
-                                      handleMatrixChange(
-                                        questionKey,
-                                        rIdx,
-                                        cIdx,
-                                        "single"
-                                      )
-                                    }
-                                    name={`matrix-${questionKey}-row-${rIdx}`}
-                                    sx={{
-                                      color: col.isExclusive
-                                        ? "orange.main"
-                                        : "inherit",
-                                      "&.Mui-checked": {
-                                        color: col.isExclusive
-                                          ? "orange.main"
-                                          : "primary.main",
-                                      },
-                                    }}
-                                  />
-                                )}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </>
-            ) : (
-              <Typography color="warning.main" variant="body2">
-                Matrix question is missing rows or columns. Please check your
-                data. <br />
-                Debug: Rows: {question.MatrixRows?.length || 0}, Columns:
-                {question.MatrixColumns?.length || 0}
-              </Typography>
-            )}
-          </Box>
+          <MatrixQuestion 
+            question={question}
+            answers={answers}
+            questionKey={questionKey}
+            handleNumericalMatrixChange={handleNumericalMatrixChange}
+            handleMatrixChange={handleMatrixChange}
+          />
         )}
 
         {question.QuestionType === "Rating" && (
@@ -1233,112 +830,29 @@ const CustomField = (props: CustomFieldProps) => {
         )}
 
         {question.QuestionType === "YesNo" && (
-          <FormControl component="fieldset">
-            <RadioGroup
-              value={currentAnswer}
-              onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
-              row
-            >
-              <FormControlLabel value="yes" control={<Radio />} label="Yes" />
-              <FormControlLabel value="no" control={<Radio />} label="No" />
-            </RadioGroup>
-          </FormControl>
-        )}
-
-        {question.QuestionType === "Number" && (
-          <TextField
-            type="number"
-            placeholder="Enter a number..."
-            variant="outlined"
-            size="small"
-            value={currentAnswer}
-            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
-          />
-        )}
-
-        {question.QuestionType === "Email" && (
-          <TextField
-            type="email"
-            placeholder="Enter your email..."
-            variant="outlined"
-            size="small"
-            fullWidth
-            value={currentAnswer}
-            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
-          />
-        )}
-
-        {question.QuestionType === "Date" && (
-          <TextField
-            type="date"
-            variant="outlined"
-            size="small"
-            value={currentAnswer}
-            onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
-            InputLabelProps={{ shrink: true }}
+          <YesNoQuestion 
+            currentAnswer={currentAnswer}
+            handleAnswerChange={handleAnswerChange}
+            questionKey={questionKey}
+            question={question}
           />
         )}
 
         {question.QuestionType === "Dropdown" && (
-          <FormControl fullWidth size="small">
-            <InputLabel>Select an option</InputLabel>
-            <Select
-              value={currentAnswer}
-              label="Select an option"
-              onChange={(e) => handleAnswerChange(questionKey, e.target.value)}
-            >
-              {question.Options?.map((option) => (
-                <MenuItem key={option.key} value={option.key}>
-                  {option.text}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <DropdownQuestion 
+            currentAnswer={currentAnswer}
+            handleAnswerChange={handleAnswerChange}
+            questionKey={questionKey}
+            question={question}
+          />
         )}
 
         {question.QuestionType === "ImageCompare" && (
-          <Box>
-            <Typography variant="body2" gutterBottom>
-              Choose an image
-            </Typography>
-            {[
-              {
-                id: "left",
-                label: "Image A",
-                src: "https://picsum.photos/seed/a/400/250",
-              },
-              {
-                id: "right",
-                label: "Image B",
-                src: "https://picsum.photos/seed/b/400/250",
-              },
-            ].map((opt) => (
-              <Card
-                key={opt.id}
-                sx={{
-                  mb: 2,
-                  border:
-                    currentAnswer === opt.id
-                      ? "3px solid #1976d2"
-                      : "1px solid #e0e0e0",
-                }}
-              >
-                <CardActionArea
-                  onClick={() => handleAnswerChange(questionKey, opt.id)}
-                >
-                  <CardMedia
-                    component="img"
-                    height="250"
-                    image={opt.src}
-                    alt={opt.label}
-                  />
-                  <Box sx={{ p: 1, textAlign: "center" }}>
-                    <Typography>{opt.label}</Typography>
-                  </Box>
-                </CardActionArea>
-              </Card>
-            ))}
-          </Box>
+          <ImageCompareQuestion 
+            currentAnswer={currentAnswer}
+            handleAnswerChange={handleAnswerChange}
+            questionKey={questionKey}
+          />
         )}
       </Paper>
     );
@@ -1374,11 +888,21 @@ const CustomField = (props: CustomFieldProps) => {
                       {groupedQuestions[currentGroupIndex].groupName}
                     </Typography>
                     <Divider sx={{ mb: 3 }} />
-                    {groupedQuestions[currentGroupIndex].questions
+                    {/* {groupedQuestions[currentGroupIndex].questions
                       .filter((q) => isQuestionVisible(q))
                       .map((question, qIndex) =>
                         renderQuestion(question, qIndex)
-                      )}
+                    )} */}
+                    
+                    {
+                      groupedQuestions[currentGroupIndex].questions
+                        .filter((q) => {
+                          const result = isQuestionVisible(q);
+                          return typeof result === 'boolean' ? result : result?.value;
+                        })
+                        .map((question, qIndex) => renderQuestion(question, qIndex))
+                    }
+
                   </>
                 )}
             </Box>
