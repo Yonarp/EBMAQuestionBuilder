@@ -29,7 +29,11 @@ export default function MultiSelectQuestion({ question, currentAnswer, questionK
                             <Checkbox
                                 checked={(currentAnswer || []).includes(option.key)}
                                 onChange={() => {
-                                    handleCheckboxChange(questionKey, option.key, Boolean(option.isExclusive), question.Options)
+                                    let isExclusive = false;
+                                    if (option.isExclusive === 1 || option.isExclusive === "1") {
+                                        isExclusive = true;
+                                    }
+                                    handleCheckboxChange(questionKey, option.key, isExclusive, question.Options)
                                 }}
                             />
                         }

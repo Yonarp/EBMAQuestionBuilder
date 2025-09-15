@@ -334,24 +334,24 @@ const CustomField = (props: CustomFieldProps) => {
 
   const handleCheckboxChange = (questionKey, optionKey, isExclusive, options) => {
     setAnswers((prev) => {
-        const currentAnswers = prev[questionKey] || [];
-        
-        if (isExclusive) {
-            return { ...prev, [questionKey]: [optionKey] };
-        } else {
-            const filteredAnswers = currentAnswers.filter(key => {
-                const option = options.find(opt => opt.key === key);
-                return !option || option.isExclusive !== "1";
-            });
-            
-            const updatedAnswers = filteredAnswers.includes(optionKey)
-                ? filteredAnswers.filter((item) => item !== optionKey)
-                : [...filteredAnswers, optionKey];
-                
-            return { ...prev, [questionKey]: updatedAnswers };
-        }
+      const currentAnswers = prev[questionKey] || [];
+
+      if (isExclusive) {
+        return { ...prev, [questionKey]: [optionKey] };
+      } else {
+        const filteredAnswers = currentAnswers.filter(key => {
+          const option = options.find(opt => opt.key === key);
+          return !option || option.isExclusive !== "1";
+        });
+
+        const updatedAnswers = filteredAnswers.includes(optionKey)
+          ? filteredAnswers.filter((item) => item !== optionKey)
+          : [...filteredAnswers, optionKey];
+
+        return { ...prev, [questionKey]: updatedAnswers };
+      }
     });
-};
+  };
 
   const handleMCQChange = (questionKey, newValue, mcqOtherValue) => {
     if (newValue === "other") {
@@ -412,7 +412,7 @@ const CustomField = (props: CustomFieldProps) => {
   const visibilityRules = useMemo(() => {
     const map = new Map();
     const showHideRules = Array.isArray(logicRules) ? logicRules.filter((r) => r.Action === "SHOW_HIDE") : [];
-    
+
     showHideRules.forEach((rule) => {
       const targetKey = rule.NextQuestion;
       if (!map.has(targetKey)) {
@@ -469,12 +469,12 @@ const CustomField = (props: CustomFieldProps) => {
         } else {
           conditionMet = userAnswer === rule.triggerAnswerKey;
         }
-      } 
+      }
 
       if (conditionMet) {
         if (rule.shouldShow) {
           return true;
-        } 
+        }
 
         if (!rule.shouldShow) {
           return false;
@@ -487,7 +487,7 @@ const CustomField = (props: CustomFieldProps) => {
     //   console.log(question);
     //   console.log(question.Visibility);
     // }
-    
+
     if (question.Visibility === "1") {
       return true;
     }
@@ -643,7 +643,7 @@ const CustomField = (props: CustomFieldProps) => {
           question.matrixJumpLogic,
           question
         );
-        
+
         if (jumpTarget) {
           const jumpToGroupIndex = questionGroupKeyToIndexMap.get(jumpTarget);
           if (jumpToGroupIndex !== undefined) {
@@ -747,6 +747,8 @@ const CustomField = (props: CustomFieldProps) => {
 
   const handleSubmit = () => {
     alert("Survey submitted! Check console for answers.");
+    console.log("====== LOGGING ANSWERS FROM SUBMIT =====");
+    console.log(answers);
     handleDialogClose();
   };
 
@@ -791,7 +793,7 @@ const CustomField = (props: CustomFieldProps) => {
         )}
 
         {question.QuestionType === "MCQ" &&
-          <McqQuestion 
+          <McqQuestion
             currentAnswer={currentAnswer}
             handleMCQChange={handleMCQChange}
             question={question}
@@ -801,7 +803,7 @@ const CustomField = (props: CustomFieldProps) => {
         }
 
         {question.QuestionType === "MultiSelect" && (
-          <MultiSelectQuestion 
+          <MultiSelectQuestion
             question={question}
             currentAnswer={currentAnswer}
             questionKey={questionKey}
@@ -810,7 +812,7 @@ const CustomField = (props: CustomFieldProps) => {
         )}
 
         {question.QuestionType === "Matrix" && (
-          <MatrixQuestion 
+          <MatrixQuestion
             question={question}
             answers={answers}
             questionKey={questionKey}
@@ -830,7 +832,7 @@ const CustomField = (props: CustomFieldProps) => {
         )}
 
         {question.QuestionType === "YesNo" && (
-          <YesNoQuestion 
+          <YesNoQuestion
             currentAnswer={currentAnswer}
             handleAnswerChange={handleAnswerChange}
             questionKey={questionKey}
@@ -839,7 +841,7 @@ const CustomField = (props: CustomFieldProps) => {
         )}
 
         {question.QuestionType === "Dropdown" && (
-          <DropdownQuestion 
+          <DropdownQuestion
             currentAnswer={currentAnswer}
             handleAnswerChange={handleAnswerChange}
             questionKey={questionKey}
@@ -848,7 +850,7 @@ const CustomField = (props: CustomFieldProps) => {
         )}
 
         {question.QuestionType === "ImageCompare" && (
-          <ImageCompareQuestion 
+          <ImageCompareQuestion
             currentAnswer={currentAnswer}
             handleAnswerChange={handleAnswerChange}
             questionKey={questionKey}
@@ -893,7 +895,7 @@ const CustomField = (props: CustomFieldProps) => {
                       .map((question, qIndex) =>
                         renderQuestion(question, qIndex)
                     )} */}
-                    
+
                     {
                       groupedQuestions[currentGroupIndex].questions
                         .filter((q) => {
