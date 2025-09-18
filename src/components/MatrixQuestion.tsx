@@ -223,7 +223,7 @@ export default function MatrixQuestion({ question, answers, questionKey, handleN
                                                                     questionKey,
                                                                     rIdx,
                                                                     cIdx,
-                                                                    "multiple"
+                                                                    "multiple",
                                                                 )
                                                             }
                                                             sx={{

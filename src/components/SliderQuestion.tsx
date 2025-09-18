@@ -39,9 +39,11 @@ export const SliderQuestion = ({ question, initialValue, onCommitAnswer }) => {
             alignItems: isVertical ? "center" : "stretch",
             gap: isVertical ? 2 : 0
         }}>
+            {showSliderValue ?
             <Typography variant="body2" gutterBottom={!isVertical}>
                 Rate from {min} to {max}
             </Typography>
+            : null}
 
             {/* Horizontal layout: anchors above slider */}
             {!isVertical && (leftAnchor || rightAnchor) && (

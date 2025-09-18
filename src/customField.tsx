@@ -47,7 +47,17 @@ import YesNoQuestion from "./components/YesNoQuestion";
 import DropdownQuestion from "./components/DropdownQuestion";
 import ImageCompareQuestion from "./components/ImageCompareQuestion";
 
+
+////////////////////////////////////////////////////////
+//////////////// NOTE: Create a patient subquestion
+//////////////// answer table which stores subquestion
+//////////////// answers, and then link each subquestion
+//////////////// answer by question key and subquestion key
+//////////////// to question and subquestion table
+////////////////////////////////////////////////////////
+
 FiveInitialize();
+const DEBUG_MODE = true; // doing some answer logs for debugging
 
 // --- MAIN SURVEY COMPONENT ---
 const CustomField = (props: CustomFieldProps) => {
@@ -84,21 +94,18 @@ const CustomField = (props: CustomFieldProps) => {
       null,
       (result) => {
         const data = JSON.parse(result.serverResponse.results);
-        const rawQuestions = Array.isArray(data.questions.records)
-          ? data.questions.records
-          : [];
-        const allAnswers = Array.isArray(data.answers.records)
-          ? data.answers.records
-          : [];
-        const allLogicRules = Array.isArray(data.logicRules.records)
-          ? data.logicRules.records
-          : [];
+        const rawQuestions = Array.isArray(data.questions.records) ? data.questions.records : [];
+        const allAnswers = Array.isArray(data.answers.records) ? data.answers.records : [];
+        const allLogicRules = Array.isArray(data.logicRules.records) ? data.logicRules.records : [];
+        const subQuestions = Array.isArray(data.subQuestions.records) ? data.subQuestions.records : [];
+
 
         setLogicRules(allLogicRules);
         const processed = processAndMergeData(
           rawQuestions,
           allAnswers,
-          allLogicRules
+          allLogicRules,
+          subQuestions
         );
         setQuestionData(processed);
         if (processed.length > 0) {
@@ -109,7 +116,7 @@ const CustomField = (props: CustomFieldProps) => {
     );
   };
 
-  const processAndMergeData = (rawQuestions, allAnswers, allLogicRules) => {
+  const processAndMergeData = (rawQuestions, allAnswers, allLogicRules, subQuestions) => {
     const questionMap = new Map();
     // 1. Initialize questions
     rawQuestions.forEach((item) => {
@@ -124,27 +131,28 @@ const CustomField = (props: CustomFieldProps) => {
       }
     });
 
-    // 2. Process answers and categorize them
+    (subQuestions || []).forEach((subQuestion) => {
+      const question = questionMap.get(subQuestion.QuestionKey);
+      if (question && question.QuestionType === "Matrix") {
+        question.MatrixRows.push({
+          key: subQuestion.SubQuestionKey,
+          text: subQuestion.SubQuestionContent,
+          order: parseInt(subQuestion.RowOrder || "0"),
+        });
+      }
+    });
+
     (allAnswers || []).forEach((answer) => {
       const question = questionMap.get(answer.QuestionKey);
       if (question) {
         if (question.QuestionType === "Matrix") {
-          if (answer.MatrixType === "row") {
-            question.MatrixRows.push({
-              key: answer.AnswerKey,
-              text: answer.Answer,
-              order: parseInt(answer.MatrixRowOrder || "0"),
-            });
-          } else if (answer.MatrixType === "column") {
-            question.MatrixColumns.push({
-              key: answer.AnswerKey,
-              text: answer.Answer,
-              order: parseInt(answer.MatrixColumnOrder || "0"),
-              // Note: We can't determine isExclusive here yet, as the flag
-              // is incorrectly located in logicRules. We'll do it in a later step.
-              isExclusive: false,
-            });
-          }
+          // For Matrix questions, answers become columns
+          question.MatrixColumns.push({
+            key: answer.AnswerKey,
+            text: answer.Answer,
+            order: parseInt(answer.AnswerOrder || "0"),
+            isExclusive: answer.IsExclusive === "1",
+          });
         } else {
           question.Options.push({
             key: answer.AnswerKey,
@@ -153,6 +161,15 @@ const CustomField = (props: CustomFieldProps) => {
             order: parseInt(answer.AnswerOrder || "0"),
           });
         }
+      }
+    });
+
+    questionMap.forEach((question) => {
+      if (question.QuestionType === "Matrix") {
+        question.MatrixRows.sort((a, b) => a.order - b.order);
+        question.MatrixColumns.sort((a, b) => a.order - b.order);
+      } else {
+        question.Options.sort((a, b) => a.order - b.order);
       }
     });
 
@@ -239,7 +256,6 @@ const CustomField = (props: CustomFieldProps) => {
         ...prev,
         [questionKey]: "Invalid validation rule.",
       }));
-
     }
   };
 
@@ -431,7 +447,6 @@ const CustomField = (props: CustomFieldProps) => {
   }, [logicRules]);
 
   const isQuestionVisible = (question): boolean => {
-    console.log("=== IS Q VISIBILE CALLED ===");
     const rulesForThisQuestion = visibilityRules.get(question.QuestionKey);
     if (!rulesForThisQuestion) {
       return question.defaultVisible;
@@ -444,17 +459,8 @@ const CustomField = (props: CustomFieldProps) => {
 
       const userAnswer = answers[rule.sourceKey];
       if (!userAnswer) continue;
-      // if (!userAnswer) {
-      //   return Boolean(question.defaultVisible);
-      // }
 
       let conditionMet = false;
-
-      if (question.Question === "<div>ShowTest</div>") {
-        console.log("==== source question ===");
-        console.log(sourceQuestion);
-      }
-
       if (sourceQuestion?.QuestionType === "Matrix") {
         // For Matrix questions with enhanced cell-specific logic
         conditionMet = checkMatrixConditionEnhanced(
@@ -481,12 +487,6 @@ const CustomField = (props: CustomFieldProps) => {
         }
       }
     }
-
-    // if (question.Question === "<div>ShowTest</div>") {
-    //   console.log("==== Visibility ===");
-    //   console.log(question);
-    //   console.log(question.Visibility);
-    // }
 
     if (question.Visibility === "1") {
       return true;
@@ -745,10 +745,197 @@ const CustomField = (props: CustomFieldProps) => {
     return null;
   };
 
+  // DEBUGGING FUNCTION -> This will help with formatting for the output
+  const logAnswersWithQuestions = (questionData, answers) => {
+    // Create a lookup map for quick question finding
+    const questionLookup = {};
+    questionData.forEach(question => {
+      questionLookup[question.QuestionKey] = question;
+    });
+
+    // Log each answer with its corresponding question
+    Object.entries(answers).forEach(([questionKey, answer]) => {
+      const question = questionLookup[questionKey];
+
+      if (question) {
+        // Strip HTML tags from question text for cleaner logging
+        const questionText = question.Question.replace(/<[^>]*>/g, '');
+
+        console.log(`Question: "${questionText}"`);
+        console.log(`Question Type: ${question.QuestionType}`);
+
+        if (question.QuestionType === "Matrix" && typeof answer === 'object' && answer !== null) {
+          // Handle Matrix answers with row and column names
+          console.log("Matrix Answer:");
+          Object.entries(answer).forEach(([rowIndex, columnSelection]) => {
+            // Get row name
+            const row = question.MatrixRows[parseInt(rowIndex)];
+            const rowText = row ? row.text.replace(/<[^>]*>/g, '') : `Row ${rowIndex}`;
+
+            if (Array.isArray(columnSelection)) {
+              // Multiple selection matrix
+              const selectedColumns = columnSelection.map(colIndex => {
+                const column = question.MatrixColumns[colIndex];
+                return column ? column.text.replace(/<[^>]*>/g, '') : colIndex.toString();
+              });
+              console.log(`  ${rowText}: [${selectedColumns.join(', ')}]`);
+            } else {
+              // Single selection matrix
+              const column = question.MatrixColumns[columnSelection];
+              let columnDisplay;
+
+              if (column) {
+                const columnText = column.text.replace(/<[^>]*>/g, '');
+                // Check if it's a numerical matrix (column text is just a number)
+                if (/^\d+$/.test(columnText.trim())) {
+                  columnDisplay = columnText;
+                } else {
+                  columnDisplay = columnText;
+                }
+              } else {
+                columnDisplay = columnSelection.toString();
+              }
+
+              console.log(`  ${rowText}: ${columnDisplay}`);
+            }
+          });
+        } else {
+          // JSON stringify if answer is an object (non-matrix)
+          const answerDisplay = typeof answer === 'object' && answer !== null
+            ? JSON.stringify(answer, null, 2)
+            : answer;
+          console.log(`Answer: ${typeof answer === 'object' && answer !== null ? '\n' + answerDisplay : '"' + answerDisplay + '"'}`);
+        }
+
+        console.log(`Question Key: ${questionKey}`);
+        console.log('---');
+      } else {
+        console.log(`Question Key: ${questionKey} - Question not found`);
+        console.log(`Answer: "${answer}"`);
+        console.log('---');
+      }
+    });
+  };
+
+  const formatSubmission = (questionData, answers) => {
+    const questionLookup = {};
+    questionData.forEach((question: any) => {
+      questionLookup[question.QuestionKey] = question;
+    })
+
+    const subQuestionResults = [];
+    const questionResults = [];
+
+    Object.entries(answers).forEach(([questionKey, answer]) => {
+      const question = questionLookup[questionKey];
+
+      if (question) {
+        if (question.QuestionType === 'Matrix' && typeof answer === 'object' && answer !== null) {
+          console.log("=== LOGGING ANSWER FOR MATRIX ===");
+          console.log(answer);
+          Object.entries(answer).forEach(([rowIndex, columnSelection]) => {
+            const row = question.MatrixRows[parseInt(rowIndex)];
+            const rowText = row ? row.text.replace(/<[^>]*>/g, '') : `Row ${rowIndex}`;
+
+            if (Array.isArray(columnSelection)) {
+              const selectedColumns = columnSelection.map((colIndex: number) => {
+                const column = question.MatrixColumns[colIndex];
+                // return column ? column.text.replace(/<[^>]*>/g, '') : colIndex.toString();
+                if (column) {
+                  const colText = column.text.replace(/<[^>]*>/g, '');
+                  subQuestionResults.push({
+                    questionKey: question.QuestionKey,
+                    // patientQuestionaireKey: question.QuestionaireKey,
+                    patientQuestionaireKey: "00b1d993-0b48-456f-9861-c4c7216a274c", // FOR DEBUGGING
+                    subQuestionTitle: rowText,
+                    subQuestionAnswer: colText
+                  })
+                }
+              })
+
+              // if numerical matrix, it is an object and not an array
+            } else if (typeof columnSelection === 'number' && question.MatrixColumns && question.MatrixColumns[columnSelection]) {
+              // Single column selection case (traditional matrix)
+              const column = question.MatrixColumns[columnSelection];
+              const colText = column.text.replace(/<[^>]*>/g, '');
+              let columnDisplay;
+
+              if (/^\d+$/.test(colText.trim())) {
+                columnDisplay = colText;
+              } else {
+                columnDisplay = colText;
+              }
+
+              subQuestionResults.push({
+                questionKey: question.QuestionKey,
+                // patientQuestionaireKey: question.QuestionaireKey,
+                patientQuestionaireKey: "00b1d993-0b48-456f-9861-c4c7216a274c", // FOR DEBUGGING
+                subQuestionTitle: rowText,
+                subQuestionAnswer: columnDisplay
+              });
+            } else {
+              subQuestionResults.push({
+                questionKey: question.QuestionKey,
+                // patientQuestionaireKey: question.QuestionaireKey,
+                patientQuestionaireKey: "00b1d993-0b48-456f-9861-c4c7216a274c", // FOR DEBUGGING
+                subQuestionTitle: rowText, // This will now correctly show the row text instead of just the index
+                subQuestionAnswer: columnSelection.toString() // The actual slider value (12, 24, etc.)
+              });
+            }
+          })
+        } else {
+          if (Array.isArray(answer)) {
+            answer.forEach(singleAnswer => {
+              const answerString = typeof singleAnswer === 'string' ? singleAnswer : String(singleAnswer);
+              const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+              const isGuid = guidRegex.test(answerString);
+
+              questionResults.push({
+                questionKey: question.QuestionKey,
+                // patientQuestionaireKey: question.QuestionaireKey, 
+                patientQuestionaireKey: "00b1d993-0b48-456f-9861-c4c7216a274c", // FOR DEBUGGING
+                isForeignKey: isGuid,
+                answer: answerString
+              });
+            });
+          } else {
+            // Single answer
+            const answerDisplay = typeof answer === 'object' && answer !== null ? JSON.stringify(answer, null, 2) : answer;
+            const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            const isGuid = typeof answer === 'string' && guidRegex.test(answer);
+
+            questionResults.push({
+              questionKey: question.QuestionKey,
+              // patientQuestionaireKey: question.QuestionaireKey, 
+              patientQuestionaireKey: "00b1d993-0b48-456f-9861-c4c7216a274c", // FOR DEBUGGING
+              isForeignKey: isGuid,
+              answer: answerDisplay
+            });
+          }
+        }
+      }
+    })
+
+    const combinedResult = {
+      SubQuestionResults: subQuestionResults,
+      QuestionResults: questionResults
+    }
+    return combinedResult;
+  }
+
   const handleSubmit = () => {
     alert("Survey submitted! Check console for answers.");
-    console.log("====== LOGGING ANSWERS FROM SUBMIT =====");
-    console.log(answers);
+    if (DEBUG_MODE) {
+      // logAnswersWithQuestions(questionData, answers);
+      // console.log("=== ENTERING FORMAT FUNCTION ===");
+      // const variables = formatSubmission(questionData, answers);
+      // five.executeFunction("Q201SaveQuestionAnswers", variables, null, null, null, (result) => {
+      //   console.log("==== ANSWERS SAVED ====");
+      // });
+    }
+    const variables = formatSubmission(questionData, answers);
+    five.executeFunction("Q201SaveQuestionAnswers", variables, null, null, null, (result) => { });
+
     handleDialogClose();
   };
 
